@@ -1,0 +1,65 @@
+# Run the web app step by step
+# Open one terminal for each section below.
+
+# --------------------------------------------------
+# 1) Go to project root
+# --------------------------------------------------
+cd /home/kabir/BUET/CSE_450_Capstone_Project_software/my-webapp
+
+# --------------------------------------------------
+# 2) Start PostgreSQL database using Docker
+# --------------------------------------------------
+docker compose up -d postgres
+
+# Check if database container is running:
+docker ps
+
+# If you want to stop it later:
+docker compose down
+
+# --------------------------------------------------
+# 3) Start the backend (FastAPI)
+# --------------------------------------------------
+# Open a new terminal and run:
+cd /home/kabir/BUET/CSE_450_Capstone_Project_software/my-webapp/backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Backend URL:
+# http://localhost:8000
+# Test it with:
+# curl http://localhost:8000/
+
+# --------------------------------------------------
+# 4) Start the frontend (React + Vite)
+# --------------------------------------------------
+# Open another new terminal and run:
+cd /home/kabir/BUET/CSE_450_Capstone_Project_software/my-webapp/frontend
+npm install
+npm run dev -- --host 0.0.0.0
+
+# Frontend URL:
+# http://localhost:5173
+
+# --------------------------------------------------
+# 5) Useful notes
+# --------------------------------------------------
+# - The backend expects PostgreSQL on localhost:5432 with database name fabric_fault_detection
+# - Frontend usually runs on port 5173
+# - If port 5173 is busy, run:
+# npm run dev -- --host 0.0.0.0 --port 5174
+
+# --------------------------------------------------
+# 6) If you need to reinstall backend packages
+# --------------------------------------------------
+# cd /home/kabir/BUET/CSE_450_Capstone_Project_software/my-webapp/backend
+# source .venv/bin/activate
+# pip install -r requirements.txt
+
+# --------------------------------------------------
+# 7) If you need to reinstall frontend packages
+# --------------------------------------------------
+# cd /home/kabir/BUET/CSE_450_Capstone_Project_software/my-webapp/frontend
+# npm install

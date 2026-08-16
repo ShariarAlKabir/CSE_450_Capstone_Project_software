@@ -1,6 +1,7 @@
 import base64
 import os
-from typing import Any, Dict, List
+from decimal import Decimal
+from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -52,6 +53,47 @@ def _grade_from_points(points_per_100: float) -> str:
     if points_per_100 <= 30:
         return "C"
     return "Reject"
+
+
+def _calculate_points_per_100(total_penalty_points: float, roll_length_yards: float) -> float:
+    if roll_length_yards <= 0:
+        return 0.0
+    return round((total_penalty_points * 100) / roll_length_yards, 2)
+
+
+def _get_severity_from_class_name(class_name: str) -> int:
+    return SEVERITY_MAP.get(class_name, 1)
+
+
+def _generate_roll_code(cur, shipment_id: int) -> str:
+    cur.execute(
+        "SELECT shipment_code FROM shipments WHERE shipment_id = %s",
+        (shipment_id,),
+    )
+    shipment = cur.fetchone()
+    if not shipment:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+
+    shipment_code = shipment["shipment_code"]
+    cur.execute(
+        "SELECT COUNT(*) AS total FROM fabric_rolls WHERE shipment_id = %s",
+        (shipment_id,),
+    )
+    count_row = cur.fetchone()
+    next_no = int(count_row["total"]) + 1
+    return f"{shipment_code}-R{next_no}"
+
+
+def _decimal_to_float(value):
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def _normalize_row(row: Dict[str, Any]):
+    if not row:
+        return row
+    return {key: _decimal_to_float(val) for key, val in row.items()}
 
 
 def _fallback_suppliers() -> List[Dict[str, Any]]:
@@ -143,6 +185,17 @@ def _get_model():
     return MODEL
 
 
+def _resize_for_inference(image_bgr: np.ndarray, max_side: int = 1024) -> np.ndarray:
+    height, width = image_bgr.shape[:2]
+    if max(height, width) <= max_side:
+        return image_bgr
+
+    scale = max_side / float(max(height, width))
+    new_w = max(1, int(round(width * scale)))
+    new_h = max(1, int(round(height * scale)))
+    return cv2.resize(image_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+
 def _annotate_image(image_bgr: np.ndarray, detections) -> str:
     annotated = image_bgr.copy()
     for box in detections:
@@ -170,8 +223,9 @@ def _annotate_image(image_bgr: np.ndarray, detections) -> str:
 
 def _analyze_fabric_image(image_bgr: np.ndarray) -> Dict[str, Any]:
     try:
+        image_bgr = _resize_for_inference(image_bgr, max_side=1024)
         model = _get_model()
-        results = model(image_bgr, conf=0.25, imgsz=640, verbose=False)
+        results = model(image_bgr, conf=0.25, imgsz=512, verbose=False)
         result = results[0]
 
         detections = []
@@ -255,6 +309,178 @@ def _analyze_fabric_image(image_bgr: np.ndarray) -> Dict[str, Any]:
         }
 
 
+@router.post("/run")
+async def run_inspection(
+    supplier_id: int = Form(...),
+    shipment_id: int = Form(...),
+    roll_length_yards: float = Form(...),
+    roll_width_inches: Optional[float] = Form(None),
+    weight_kg: Optional[float] = Form(None),
+    inspector_notes: Optional[str] = Form(None),
+    files: List[UploadFile] = File(...),
+):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            roll_code = _generate_roll_code(cur, shipment_id)
+
+        results_output = []
+        total_defects_found = 0
+        defect_summary: Dict[str, int] = {}
+
+        for index, file in enumerate(files, start=1):
+            if not file.filename:
+                continue
+
+            contents = await file.read()
+            image_array = np.frombuffer(contents, dtype=np.uint8)
+            image_bgr = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+            if image_bgr is None:
+                raise HTTPException(status_code=400, detail=f"Could not decode uploaded image: {file.filename}")
+
+            result = _analyze_fabric_image(image_bgr)
+            detections = []
+
+            for det in result.get("detections", []):
+                class_name = det.get("defect_type")
+                total_defects_found += 1
+                defect_summary[class_name] = defect_summary.get(class_name, 0) + 1
+                detections.append(
+                    {
+                        "image_index": index,
+                        "class_id": CLASS_NAMES.get(next((k for k, v in CLASS_NAMES.items() if v == class_name), 0), 0),
+                        "class_name": class_name,
+                        "severity": _get_severity_from_class_name(class_name),
+                        "confidence": float(det.get("confidence_score", 0.0)),
+                        "bbox": {
+                            "x1": float(det.get("bbox", [0, 0, 0, 0])[0]),
+                            "y1": float(det.get("bbox", [0, 0, 0, 0])[1]),
+                            "x2": float(det.get("bbox", [0, 0, 0, 0])[2]),
+                            "y2": float(det.get("bbox", [0, 0, 0, 0])[3]),
+                        },
+                        "position_x": det.get("position_x"),
+                        "position_y": det.get("position_y"),
+                    }
+                )
+
+            results_output.append(
+                {
+                    "filename": file.filename,
+                    "image_index": index,
+                    "detections": detections,
+                    "annotated_image": result.get("annotated_image"),
+                }
+            )
+
+        return {
+            "roll_code": roll_code,
+            "supplier_id": supplier_id,
+            "shipment_id": shipment_id,
+            "roll_length_yards": roll_length_yards,
+            "roll_width_inches": roll_width_inches,
+            "weight_kg": weight_kg,
+            "inspector_notes": inspector_notes,
+            "total_images_processed": len(files),
+            "total_defects_found": total_defects_found,
+            "defect_summary": defect_summary,
+            "results": results_output,
+        }
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@router.post("/save")
+def save_inspection(payload: Dict[str, Any]):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM shipments WHERE shipment_id = %s", (payload.get("shipment_id"),))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="Shipment not found")
+
+            roll_code = payload.get("roll_code") or "R-01"
+            cur.execute(
+                """
+                INSERT INTO fabric_rolls
+                (shipment_id, roll_code, roll_length_yards, roll_width_inches, weight_kg, inspection_date, inspection_time, inspector_notes)
+                VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, CURRENT_TIME, %s)
+                RETURNING *
+                """,
+                (
+                    payload.get("shipment_id"),
+                    roll_code,
+                    payload.get("roll_length_yards"),
+                    payload.get("roll_width_inches"),
+                    payload.get("weight_kg"),
+                    payload.get("inspector_notes"),
+                ),
+            )
+            roll = cur.fetchone()
+
+            total_penalty_points = float(payload.get("total_penalty_points", 0.0))
+            points_per_100 = float(payload.get("points_per_100_yards", 0.0))
+            grade = payload.get("grade") or _grade_from_points(points_per_100)
+            status = payload.get("status") or "Pending Review"
+
+            cur.execute(
+                """
+                INSERT INTO inspections
+                (roll_id, total_images_processed, total_defects_found, total_penalty_points, points_per_100_yards, grade, model_version, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    roll["roll_id"],
+                    payload.get("total_images_processed", 0),
+                    payload.get("total_defects_found", 0),
+                    total_penalty_points,
+                    points_per_100,
+                    grade,
+                    MODEL_VERSION,
+                    status,
+                ),
+            )
+            inspection = cur.fetchone()
+
+            for item in payload.get("detections", []):
+                image_index = item.get("image_index", 0)
+                for det in item.get("detections", []):
+                    cur.execute(
+                        """
+                        INSERT INTO defects
+                        (inspection_id, image_index, defect_type, severity, confidence_score, position_x, position_y)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            inspection["inspection_id"],
+                            image_index,
+                            det.get("class_name"),
+                            det.get("severity", 1),
+                            det.get("confidence"),
+                            det.get("position_x"),
+                            det.get("position_y"),
+                        ),
+                    )
+
+            conn.commit()
+            return {
+                "message": "Inspection saved successfully",
+                "roll": _normalize_row(roll),
+                "inspection": _normalize_row(inspection),
+            }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @router.post("/inspect")
 async def inspect_fabric(
     file: UploadFile = File(...),
@@ -283,6 +509,6 @@ async def inspect_fabric(
 def summary():
     return {
         "fabric_types": ["Cotton", "Denim", "Knitted"],
-        "model_version": "heuristic-fabric-inspection-v1",
+        "model_version": MODEL_VERSION,
         "status": "ready",
     }

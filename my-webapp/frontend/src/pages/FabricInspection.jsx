@@ -95,7 +95,7 @@ function FabricInspection() {
                         onClick={handleInspect}
                         disabled={loading}
                     >
-                        {loading ? "Inspecting..." : "Run Fabric Inspection"}
+                        {loading ? "Running defect detection..." : "Run Fabric Inspection"}
                     </button>
                 </div>
 

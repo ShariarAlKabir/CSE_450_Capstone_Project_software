@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import axios from "axios";
 
-function NonDeterministic() {
-    const navigate = useNavigate();
+import AppShell from "../components/AppShell";
 
+function NonDeterministic() {
     const [message, setMessage] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
@@ -19,8 +18,8 @@ function NonDeterministic() {
             );
 
             setMessage(response.data.message);
-        } catch (error) {
-            console.error(error);
+        } catch (requestError) {
+            console.error(requestError);
             setError("Could not connect to the backend.");
         } finally {
             setLoading(false);
@@ -28,89 +27,69 @@ function NonDeterministic() {
     };
 
     return (
-        <div style={styles.container}>
-            <h1>Non-Deterministic Approach</h1>
+        <AppShell
+            accent="blue"
+            eyebrow="Assisted Review"
+            title="Non-deterministic inspection workspace"
+            description="Use this path when the label workflow depends on backend-driven logic rather than a fixed comparison pipeline."
+            backTo="/label-inspection"
+            backLabel="Back to label modes"
+            aside={
+                <div className="hero-note">
+                    <div className="section-label">Intended use</div>
+                    <p>
+                        This screen is positioned as a secondary workflow, with
+                        room for future model prompts, guided analysis, or
+                        operator-led review states.
+                    </p>
+                </div>
+            }
+        >
+            <section className="section-grid section-grid--two">
+                <article className="panel-card">
+                    <div className="section-label">Workflow trigger</div>
+                    <h2>Request a backend response</h2>
+                    <p>
+                        The current implementation validates connectivity with
+                        the Python service. The interface is now structured to
+                        support richer analysis outputs later.
+                    </p>
 
-            <p>
-                This is the non-deterministic page.
-            </p>
+                    <button
+                        className="button button-primary"
+                        onClick={callBackend}
+                        disabled={loading}
+                    >
+                        {loading ? "Contacting backend..." : "Run backend action"}
+                    </button>
+                </article>
 
-            <button
-                style={styles.button}
-                onClick={callBackend}
-                disabled={loading}
-            >
-                {loading ? "Loading..." : "Call Python Backend"}
-            </button>
+                <article className="panel-card panel-card--contrast">
+                    <div className="section-label">Live response</div>
 
-            {message && (
-                <p style={styles.message}>
-                    Backend response: {message}
-                </p>
-            )}
+                    {message ? (
+                        <div className="status-banner status-banner--success">
+                            Backend response: {message}
+                        </div>
+                    ) : (
+                        <div className="empty-state">
+                            <strong>No response yet</strong>
+                            <span>
+                                Trigger the workflow to show the current backend
+                                message here.
+                            </span>
+                        </div>
+                    )}
 
-            {error && (
-                <p style={styles.error}>
-                    {error}
-                </p>
-            )}
-
-            <button
-                style={styles.backButton}
-                onClick={() => navigate("/")}
-            >
-                Back to Home
-            </button>
-        </div>
+                    {error && (
+                        <div className="status-banner status-banner--error">
+                            {error}
+                        </div>
+                    )}
+                </article>
+            </section>
+        </AppShell>
     );
 }
-
-const styles = {
-    container: {
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-        alignItems: "center",
-        fontFamily: "Inter, Segoe UI, sans-serif",
-        background: "radial-gradient(circle at top, rgba(59,130,246,0.12), transparent 30%), linear-gradient(180deg, #070b14, #0b1020 45%, #0e1528)",
-        color: "#e2e8f0",
-        padding: "32px",
-    },
-
-    button: {
-        padding: "14px 24px",
-        fontSize: "16px",
-        cursor: "pointer",
-        borderRadius: "10px",
-        border: "1px solid rgba(96, 165, 250, 0.32)",
-        background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
-        color: "white",
-        fontWeight: 600,
-    },
-
-    backButton: {
-        padding: "12px 24px",
-        fontSize: "16px",
-        cursor: "pointer",
-        borderRadius: "10px",
-        border: "1px solid rgba(148,163,184,0.2)",
-        background: "rgba(15,23,42,0.75)",
-        color: "#e2e8f0",
-        marginTop: "20px",
-    },
-
-    message: {
-        marginTop: "20px",
-        fontSize: "18px",
-        color: "#dbeafe",
-    },
-
-    error: {
-        marginTop: "20px",
-        fontSize: "18px",
-        color: "#fecaca",
-    },
-};
 
 export default NonDeterministic;

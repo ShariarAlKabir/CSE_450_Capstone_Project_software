@@ -1,104 +1,99 @@
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
+
+import AppShell from "../components/AppShell";
+
+const workflows = [
+    {
+        title: "Fabric Inspection",
+        description:
+            "Run defect detection on incoming rolls with annotated outputs, grading, and penalty summaries.",
+        to: "/fabric-inspection",
+        tone: "primary",
+    },
+    {
+        title: "Label Inspection",
+        description:
+            "Validate packaging labels through deterministic and assisted review workflows.",
+        to: "/label-inspection",
+        tone: "secondary",
+    },
+];
+
+const operationalSignals = [
+    "Standardized review paths for fabric and label quality teams",
+    "Clear upload, result, and verdict states across all workflows",
+    "Designed for operators, supervisors, and audit reporting",
+];
 
 function Home() {
-    const navigate = useNavigate();
-
     return (
-        <div style={styles.container}>
-            <div style={styles.panel}>
-                <div style={styles.eyebrow}>Quality Control System</div>
-                <h1>Inspection Dashboard</h1>
-                <p style={styles.subtitle}>Choose a category to continue.</p>
+        <AppShell
+            accent="teal"
+            eyebrow="Quality Control Operations"
+            title="Inspection dashboard for textile production teams"
+            description="A single workspace for fabric defect review and label validation, redesigned to feel trustworthy, sharp, and production-ready."
+            aside={
+                <div className="hero-metrics">
+                    <div className="hero-metric">
+                        <span className="hero-metric__value">02</span>
+                        <span className="hero-metric__label">Core workflows</span>
+                    </div>
 
-                <div style={styles.buttonContainer}>
-                    <button
-                        style={styles.buttonPrimary}
-                        onClick={() => navigate("/fabric-inspection")}
-                    >
-                        Fabric Inspection
-                    </button>
+                    <div className="hero-metric">
+                        <span className="hero-metric__value">Fast</span>
+                        <span className="hero-metric__label">Operator handoff</span>
+                    </div>
 
-                    <button
-                        style={styles.buttonSecondary}
-                        onClick={() => navigate("/label-inspection")}
-                    >
-                        Label Inspection
-                    </button>
+                    <div className="hero-metric">
+                        <span className="hero-metric__value">Clear</span>
+                        <span className="hero-metric__label">Decision visibility</span>
+                    </div>
                 </div>
-            </div>
-        </div>
+            }
+        >
+            <section className="section-grid section-grid--two">
+                <article className="panel-card">
+                    <div className="section-label">Platform overview</div>
+                    <h2>Built for inspection teams that need confidence, not clutter.</h2>
+                    <p>
+                        Every screen now follows the same visual language, so
+                        operators can move from intake to decision without
+                        re-learning the interface each time.
+                    </p>
+
+                    <ul className="feature-list">
+                        {operationalSignals.map((signal) => (
+                            <li key={signal}>{signal}</li>
+                        ))}
+                    </ul>
+                </article>
+
+                <article className="panel-card panel-card--elevated">
+                    <div className="section-label">Available workflows</div>
+                    <div className="choice-grid">
+                        {workflows.map((workflow) => (
+                            <Link
+                                key={workflow.title}
+                                className={`choice-card choice-card--${workflow.tone}`}
+                                to={workflow.to}
+                            >
+                                <span className="choice-card__eyebrow">
+                                    Open workflow
+                                </span>
+
+                                <h3>{workflow.title}</h3>
+                                <p>{workflow.description}</p>
+
+                                <span className="choice-card__cta">
+                                    Continue
+                                </span>
+                            </Link>
+                        ))}
+                    </div>
+                </article>
+            </section>
+        </AppShell>
     );
 }
-
-const styles = {
-    container: {
-        minHeight: "100vh",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        padding: "32px",
-        fontFamily: "Inter, Segoe UI, sans-serif",
-    },
-
-    panel: {
-        width: "100%",
-        maxWidth: "760px",
-        background: "linear-gradient(180deg, rgba(17,24,39,0.95), rgba(15,23,42,0.9))",
-        border: "1px solid rgba(148,163,184,0.2)",
-        borderRadius: "20px",
-        boxShadow: "0 24px 80px rgba(0,0,0,0.45)",
-        padding: "40px 32px",
-        textAlign: "center",
-    },
-
-    eyebrow: {
-        display: "inline-block",
-        padding: "6px 12px",
-        borderRadius: "999px",
-        backgroundColor: "rgba(139, 92, 246, 0.15)",
-        color: "#c4b5fd",
-        fontSize: "12px",
-        letterSpacing: "0.12em",
-        textTransform: "uppercase",
-        marginBottom: "18px",
-        border: "1px solid rgba(139, 92, 246, 0.35)",
-    },
-
-    subtitle: {
-        fontSize: "18px",
-        marginBottom: "32px",
-        color: "#cbd5e1",
-    },
-
-    buttonContainer: {
-        display: "flex",
-        gap: "20px",
-        flexWrap: "wrap",
-        justifyContent: "center",
-    },
-
-    buttonPrimary: {
-        padding: "18px 28px",
-        fontSize: "18px",
-        cursor: "pointer",
-        borderRadius: "12px",
-        border: "1px solid rgba(139, 92, 246, 0.5)",
-        background: "linear-gradient(135deg, #8b5cf6, #7c3aed)",
-        color: "white",
-        fontWeight: 600,
-        boxShadow: "0 12px 36px rgba(124, 58, 237, 0.38)",
-    },
-
-    buttonSecondary: {
-        padding: "18px 28px",
-        fontSize: "18px",
-        cursor: "pointer",
-        borderRadius: "12px",
-        border: "1px solid rgba(148,163,184,0.25)",
-        background: "rgba(15, 23, 42, 0.7)",
-        color: "#e2e8f0",
-        fontWeight: 600,
-    },
-};
 
 export default Home;

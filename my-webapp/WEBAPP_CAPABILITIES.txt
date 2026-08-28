@@ -1,0 +1,305 @@
+TEXTILE QUALITY PLATFORM
+WEBAPP CAPABILITIES GUIDE
+
+Overview
+========
+This web application is a textile quality-control and supplier-operations
+workspace. It combines AI-assisted fabric and label inspection with supplier,
+shipment, cost, reporting, alerting, and access-management views.
+
+The application has two kinds of functionality:
+
+1. Live AI inspection functionality
+   These screens send uploaded images to the current FastAPI backend.
+
+2. Operations workspace functionality
+   These screens are fully interactive in the frontend and use structured
+   demonstration data. Their UI interactions work now, and the data layer is
+   ready to be connected to supplier/shipment/reporting APIs when those backend
+   endpoints are available.
+
+
+1. DASHBOARD
+============
+Route: /
+
+The dashboard provides a high-level quality and business overview.
+
+Available capabilities:
+- View active supplier, inbound shipment, inspection, and cleared-roll KPIs.
+- View an accepted-roll quality trend chart and compare the current score with
+  the target score.
+- Review grade distribution: A, B, C, and Reject outcomes.
+- Review the defect-type mix, including the most common defect fingerprint.
+- Identify suppliers needing attention because of low score or rejection
+  streaks.
+- View a recommended volume-shift action for a weak supplier.
+- Review the recent operator inspection queue.
+- Review a chronological control-room activity feed.
+- View AI-vs-manual inspection performance:
+  - Manual and AI-assisted time per roll.
+  - Cumulative savings since adoption.
+  - Labor-hours saved.
+  - Break-even progress.
+- Navigate directly to fabric inspection or label inspection tools.
+- Open the reporting workspace and start an inspection from the page header.
+
+
+2. FABRIC INSPECTION (LIVE BACKEND INTEGRATION)
+================================================
+Route: /fabric-inspection
+Backend endpoint: POST /api/fabric/inspect
+
+Available capabilities:
+- Upload a fabric image in common image formats.
+- Preview the image before inspection.
+- Send the selected image to the fabric AI endpoint.
+- Receive and display the inspection result.
+- Display the assigned fabric grade and inspection status.
+- Display total detected defects, penalty points, points per 100 yards, and
+  model version.
+- Display a backend-generated annotated image with detection overlays when
+  the backend returns one.
+- View detected defect entries with defect type, severity, and confidence.
+- Receive clear upload, request, and backend error feedback.
+
+The current request also includes the existing supplier ID, shipment ID, and
+roll-code fields expected by the backend.
+
+
+3. LABEL INSPECTION (LIVE BACKEND INTEGRATION)
+==============================================
+Route: /label-inspection
+
+Available capabilities:
+- Choose deterministic or non-deterministic label inspection.
+- Navigate back to the broader inspection workspace.
+
+3.1 Deterministic Label Review
+------------------------------
+Route: /deterministic
+Backend endpoint: POST /api/deterministic/inspect
+
+Available capabilities:
+- Upload an approved golden/reference label image.
+- Upload a production candidate label image.
+- Preview both images before starting analysis.
+- Send both images to the deterministic inspection backend.
+- Display the final verdict and backend summary.
+- Display the gate-one skew-angle result.
+- Display target width and height.
+- Display gate-two visual results, including SSIM data where provided.
+- Display backend diagnostic evidence images when supplied.
+- Clearly handle missing files, backend failures, and in-progress states.
+
+3.2 Non-deterministic Label Review
+----------------------------------
+Route: /non-deterministic
+
+Available capabilities:
+- Start the existing non-deterministic label inspection action.
+- Display success, failure, and empty-result states.
+
+
+4. SUPPLIER INTELLIGENCE
+========================
+Route: /suppliers
+
+Available capabilities:
+- Browse the supplier list.
+- Search suppliers by name.
+- Filter suppliers by quality tier:
+  - Preferred
+  - Standard
+  - Watchlist
+- Sort suppliers by overall score, quality, cost efficiency, delivery, or name.
+- Select a supplier to open its profile view.
+- View editable-ready supplier profile information:
+  - Location and contact.
+  - Quality tier.
+  - Trend: Improving, Stable, or Declining.
+  - Auto-updating quality rating concept.
+  - Unified quality, cost, and delivery scorecard.
+- View a GitHub-style lot-quality heatmap.
+- View the supplier's defect-type fingerprint.
+- View Cost of Poor Quality (COPQ).
+- View effective cost per accepted yard.
+- View on-time delivery percentage.
+- View contract-renewal date and spend concentration/risk exposure.
+- View a switch recommendation based on supplier quality and cost risk.
+- Select any two suppliers for side-by-side comparison.
+- View a price-versus-defect-rate scatter plot.
+- Export/print a supplier negotiation packet.
+
+Note: supplier entries currently come from frontend demonstration data. The UI
+is designed to receive live supplier API data without changing its workflows.
+
+
+5. SHIPMENT OPERATIONS
+======================
+Route: /shipments
+
+Available capabilities:
+- Browse the inbound shipment register.
+- Filter shipments by lifecycle status:
+  - In transit
+  - Inspecting
+  - Cleared
+  - Rejected
+- Select a shipment to see its detailed view.
+- View supplier, fabric type, number of rolls, received date, status, and value.
+- View a lifecycle tracker:
+  - In Transit
+  - Received
+  - Inspecting
+  - Cleared / Rejected
+- View the current sampling stage and quality status.
+- View multi-stage sampling steps:
+  - Initial
+  - Second
+  - Final
+- View a shipment performance-over-time visualization.
+- Add notes and open roll-inspection actions from the detail screen.
+- Export/print the shipment view.
+
+
+6. INSPECTION CONTROL
+=====================
+Route: /inspections
+
+Available capabilities:
+- Open the live fabric and label AI tools from a central inspection page.
+- Review the inspection queue.
+- Filter the queue by All, Needs review, Approved, or Rejected.
+- View roll, supplier, defect count, confidence, grade, and status.
+- View confidence-routing policy guidance:
+  - 95% and higher: eligible for automated clearance after policy checks.
+  - 80% to 94%: inspector review required.
+  - Under 80%: manual confirmation required.
+- View inspection notes and add a note draft.
+- Open evidence from the queue.
+- Trigger a two-step confirmation dialog for a critical approval action.
+- Record the confirmation as a visible manager-sign-off message.
+
+Future backend connection points:
+- Persist inspection notes.
+- Persist approvals/rejections and manager sign-off.
+- Store the inspection audit trail.
+- Serve saved bounding-box images and image metadata.
+- Support mobile camera capture via browser media APIs or a native client.
+
+
+7. COST SAVINGS, ROI, REPORTS, AND FORECASTING
+===============================================
+Route: /reports
+
+Available capabilities:
+- View the quality performance forecast.
+- View next-quarter projected reject cost.
+- View payback/break-even progress for system adoption.
+- Compare manual and AI-assisted inspection time.
+- View labor-hours saved.
+- View estimated cost saved per shipment.
+- View AI detection consistency against the historical manual baseline.
+- Use the budget-impact simulator to model a shift of supplier volume.
+- View the projected reject-cost reduction and quality impact of the shift.
+- Export a management report.
+- Export an Excel-labeled report.
+- Export individual ready-report items.
+- Print all report views in a clean, report-oriented layout.
+
+Current export behavior:
+- Exports are generated locally as text report files because PDF/Excel report
+  generation endpoints are not yet present in the backend.
+- The print layout can be sent to a printer or browser PDF generator.
+
+
+8. NOTIFICATIONS
+================
+Route: /notifications
+
+Available capabilities:
+- View alerts for supplier tier downgrades.
+- View alerts for rejection streaks.
+- View alerts for approaching contract renewals.
+- View inspection-queue alerts.
+- Filter alerts by type or unread state.
+- Mark one alert as read.
+- Mark all alerts as read.
+- See unread-count indicators in the application navigation.
+
+
+9. ACCOUNT, ROLES, AND AUDIT HISTORY
+=====================================
+Route: /account
+
+Available capabilities:
+- View the current signed-in user profile.
+- Switch the active demonstration role:
+  - Inspector
+  - Manager
+  - Admin
+- View the responsibilities/permissions associated with each role.
+- Open the team-access management action.
+- View audit/activity history.
+- Export the audit-log action.
+
+Important limitation:
+- This is a role-aware frontend interface, not a completed authentication or
+  authorization implementation. A secure production setup needs backend login,
+  session/token handling, role enforcement on API endpoints, and a persistent
+  audit log.
+
+
+10. GLOBAL NAVIGATION AND SEARCH
+================================
+Available capabilities:
+- Persistent navigation to Dashboard, Suppliers, Shipments, Inspections,
+  Reports, Notifications, and Account.
+- Global search for suppliers and shipments.
+- Search results link directly to the selected supplier or shipment detail.
+- Responsive mobile navigation menu.
+- Keyboard-accessible form controls and focus states.
+- Responsive layouts for desktop, tablet, and mobile viewports.
+
+
+DATA AND BACKEND STATUS
+=======================
+Live backend endpoints currently used:
+- POST /api/fabric/inspect
+- POST /api/deterministic/inspect
+
+Current database schema includes:
+- suppliers
+- shipments
+- fabric_rolls
+- inspections
+- defects
+
+Backend APIs still needed to make the management workspace fully live:
+- Supplier list, detail, create, update, rating, heatmap, and comparison APIs.
+- Shipment list, detail, filtering, lifecycle, sampling, and roll APIs.
+- Inspection queue, approval/rejection, comments, manager sign-off, and
+  bounding-box asset APIs.
+- Dashboard KPI, trend, grade distribution, defect breakdown, and activity APIs.
+- ROI/cost model, savings history, and forecast APIs.
+- PDF and XLSX report-generation APIs.
+- Notification persistence and delivery APIs.
+- Authentication, role-based access control, supplier portal, and audit-log APIs.
+- Global search API across suppliers, shipments, rolls, and inspections.
+
+
+HOW TO RUN
+==========
+Frontend:
+1. Open the my-webapp/frontend directory.
+2. Run: npm run dev -- --host 0.0.0.0
+3. Open the Vite URL shown in the terminal.
+
+Backend:
+1. Start the FastAPI service on port 8000.
+2. The live fabric and deterministic inspection pages call localhost:8000.
+
+Quality checks already completed for the current frontend:
+- npm run build
+- npm run lint

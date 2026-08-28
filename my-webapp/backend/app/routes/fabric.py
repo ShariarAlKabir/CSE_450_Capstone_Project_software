@@ -512,3 +512,261 @@ def summary():
         "model_version": MODEL_VERSION,
         "status": "ready",
     }
+
+
+@router.get("/inspections")
+def get_inspections():
+    """Return all inspections joined with roll, shipment, and supplier info."""
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    i.inspection_id,
+                    fr.roll_code,
+                    s.name AS supplier,
+                    i.status,
+                    i.grade,
+                    ROUND(COALESCE(
+                        CASE
+                            WHEN i.total_defects_found = 0 THEN 98
+                            WHEN i.grade = 'A' THEN 95
+                            WHEN i.grade = 'B' THEN 88
+                            WHEN i.grade = 'C' THEN 78
+                            ELSE 65
+                        END, 80
+                    )) AS confidence,
+                    i.total_defects_found AS defects,
+                    i.inspected_at
+                FROM inspections i
+                JOIN fabric_rolls fr ON i.roll_id = fr.roll_id
+                JOIN shipments sh ON fr.shipment_id = sh.shipment_id
+                JOIN suppliers s ON sh.supplier_id = s.supplier_id
+                ORDER BY i.inspected_at DESC
+                LIMIT 100
+                """
+            )
+            rows = cur.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                d["id"] = f"IN-{d['inspection_id']}"
+                d["roll"] = d.get("roll_code", "")
+                # Map DB status to frontend display status
+                status = d.get("status", "Pending Review")
+                if status == "Pending Review":
+                    d["status"] = "Needs review"
+                d["confidence"] = int(d.get("confidence", 80))
+                d["defects"] = int(d.get("defects", 0))
+                d["grade"] = d.get("grade", "A")
+                d["scope"] = "Fabric"
+                # Format time
+                if d.get("inspected_at"):
+                    d["time"] = str(d["inspected_at"])[:16]
+                else:
+                    d["time"] = "N/A"
+                result.append(d)
+            return {"inspections": result}
+    except Exception:
+        return {"inspections": []}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@router.get("/dashboard/stats")
+def get_dashboard_stats():
+    """Return KPI stats for the dashboard."""
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS total FROM suppliers")
+            total_suppliers = cur.fetchone()["total"]
+
+            cur.execute("SELECT COUNT(*) AS total FROM shipments")
+            total_shipments = cur.fetchone()["total"]
+
+            cur.execute("SELECT COUNT(*) AS total FROM inspections")
+            total_inspections = cur.fetchone()["total"]
+
+            cur.execute("SELECT COUNT(*) AS total FROM fabric_rolls")
+            total_rolls = cur.fetchone()["total"]
+
+            # Grade distribution
+            cur.execute(
+                """
+                SELECT grade, COUNT(*) AS count
+                FROM inspections
+                WHERE grade IS NOT NULL
+                GROUP BY grade
+                """
+            )
+            grade_rows = cur.fetchall()
+            grade_dist = {"A": 0, "B": 0, "C": 0, "Reject": 0}
+            for row in grade_rows:
+                grade_dist[row["grade"]] = int(row["count"])
+
+            # Defect breakdown
+            cur.execute(
+                """
+                SELECT defect_type, COUNT(*) AS count
+                FROM defects
+                GROUP BY defect_type
+                ORDER BY count DESC
+                """
+            )
+            defect_rows = cur.fetchall()
+            defect_breakdown = [{"label": row["defect_type"], "value": int(row["count"])} for row in defect_rows]
+
+            # Average quality score from recent shipments for trend
+            cur.execute(
+                """
+                SELECT ROUND(AVG(quality_score)::numeric, 1) AS avg_score
+                FROM shipments
+                WHERE quality_score IS NOT NULL
+                """
+            )
+            avg_quality = float(cur.fetchone()["avg_score"] or 85)
+
+            return {
+                "total_suppliers": int(total_suppliers),
+                "total_shipments": int(total_shipments),
+                "total_inspections": int(total_inspections),
+                "total_rolls": int(total_rolls),
+                "avg_quality": avg_quality,
+                "grade_distribution": [
+                    {"label": "A", "value": grade_dist["A"], "tone": "grade-a"},
+                    {"label": "B", "value": grade_dist["B"], "tone": "grade-b"},
+                    {"label": "C", "value": grade_dist["C"], "tone": "grade-c"},
+                    {"label": "Reject", "value": grade_dist["Reject"], "tone": "grade-r"},
+                ],
+                "defect_breakdown": defect_breakdown,
+            }
+    except Exception:
+        return {
+            "total_suppliers": 0,
+            "total_shipments": 0,
+            "total_inspections": 0,
+            "total_rolls": 0,
+            "avg_quality": 85,
+            "grade_distribution": [],
+            "defect_breakdown": [],
+        }
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@router.get("/suppliers/{supplier_id}")
+def get_supplier_detail(supplier_id: int):
+    """Return a single supplier with shipment count and inspection summary."""
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM suppliers WHERE supplier_id = %s",
+                (supplier_id,),
+            )
+            supplier = cur.fetchone()
+            if not supplier:
+                raise HTTPException(status_code=404, detail="Supplier not found")
+
+            cur.execute(
+                "SELECT COUNT(*) AS total FROM shipments WHERE supplier_id = %s",
+                (supplier_id,),
+            )
+            shipment_count = cur.fetchone()["total"]
+
+            # Get recent inspection grades for heatmap
+            cur.execute(
+                """
+                SELECT i.grade
+                FROM inspections i
+                JOIN fabric_rolls fr ON i.roll_id = fr.roll_id
+                JOIN shipments sh ON fr.shipment_id = sh.shipment_id
+                WHERE sh.supplier_id = %s AND i.grade IS NOT NULL
+                ORDER BY i.inspected_at DESC
+                LIMIT 12
+                """,
+                (supplier_id,),
+            )
+            grade_rows = cur.fetchall()
+            heatmap = []
+            for row in grade_rows:
+                g = row["grade"]
+                if g == "A":
+                    heatmap.append("a")
+                elif g == "B":
+                    heatmap.append("b")
+                elif g == "C":
+                    heatmap.append("c")
+                else:
+                    heatmap.append("r")
+            # Pad to 12 entries
+            while len(heatmap) < 12:
+                heatmap.append("a")
+
+            result = _normalize_row(dict(supplier))
+            result["shipment_count"] = int(shipment_count)
+            result["heatmap"] = heatmap
+
+            return result
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error fetching supplier detail")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@router.put("/suppliers/{supplier_id}")
+def update_supplier(supplier_id: int, payload: Dict[str, Any]):
+    """Update supplier details."""
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM suppliers WHERE supplier_id = %s",
+                (supplier_id,),
+            )
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="Supplier not found")
+
+            updates = []
+            values = []
+            allowed = ["name", "country", "city", "contact_person", "contact_email", "contact_phone", "supplier_rating"]
+            for field in allowed:
+                if field in payload:
+                    updates.append(f"{field} = %s")
+                    values.append(payload[field])
+
+            if not updates:
+                raise HTTPException(status_code=400, detail="No valid fields to update")
+
+            values.append(supplier_id)
+            cur.execute(
+                f"UPDATE suppliers SET {', '.join(updates)} WHERE supplier_id = %s RETURNING *",
+                values,
+            )
+            updated = cur.fetchone()
+            conn.commit()
+            return {"message": "Supplier updated", "supplier": _normalize_row(dict(updated))}
+    except HTTPException:
+        raise
+    except Exception:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail="Error updating supplier")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+

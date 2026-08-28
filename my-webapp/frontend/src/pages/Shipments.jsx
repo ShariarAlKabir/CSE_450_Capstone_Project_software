@@ -8,7 +8,7 @@ const stages = ["In transit", "Received", "Inspecting", "Cleared / Rejected"];
 
 const normalizeShipment = (row, supplierMap) => {
     const qualityScore = row.quality_score == null ? null : Number(row.quality_score);
-    let stage = "In transit";
+    let stage;
 
     if (qualityScore == null) {
         stage = "In transit";

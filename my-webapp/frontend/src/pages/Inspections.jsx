@@ -1,13 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import axios from "axios";
 
 import OperationsShell from "../components/OperationsShell";
-import { inspections } from "../data/operationsData";
 
 function Inspections() {
     const [filter, setFilter] = useState("All");
     const [pendingAction, setPendingAction] = useState("");
     const [confirmed, setConfirmed] = useState("");
+    const [inspections, setInspections] = useState([]);
+
+    useEffect(() => {
+        axios.get("http://localhost:8000/api/fabric/inspections")
+            .then((response) => setInspections(response.data?.inspections || []))
+            .catch(() => setInspections([]));
+    }, []);
+
     const visible = inspections.filter((inspection) => filter === "All" || inspection.status === filter);
 
     return <OperationsShell eyebrow="Inspection control" title="Resolve exceptions with evidence." actions={<Link className="button button-primary" to="/fabric-inspection">Upload fabric image</Link>}>

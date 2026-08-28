@@ -1,0 +1,114 @@
+# CSE 450 Capstone Project
+
+Supplier, Shipment, and Inspection Management System
+
+---
+
+## Overview
+
+This project is a full-stack system designed to manage suppliers, shipments, and inspections in a structured and data-driven way.
+
+You can track performance, monitor quality, and make decisions using visual insights.
+
+The system focuses on three core areas:
+
+* Supplier performance
+* Shipment tracking
+* Inspection control
+
+---
+
+## Key Features
+
+### Dashboard
+
+The dashboard gives you a quick view of the entire system.
+
+You can see:
+
+* Total suppliers, shipments, and inspections
+* Performance trends
+* Visual graphs for better understanding
+
+You use this page to monitor overall activity and spot issues early.
+
+---
+
+### Suppliers Module
+
+You can manage all suppliers in one place.
+
+Each supplier includes:
+
+* Name
+* Rating
+* Shipment count
+
+When you open a supplier profile, you get:
+
+* Full editable details
+* All shipments linked to that supplier
+* A visual rating graph
+
+The rating graph works like GitHub contributions:
+
+* Green → Grade A
+* Yellow → Grade B
+* Orange → Grade C
+* Red → Failed
+
+You can also:
+
+* Search suppliers
+* Sort by name or rating
+* Filter using different attributes
+
+---
+
+### Shipments Module
+
+You can track and manage all shipments.
+
+Each shipment contains:
+
+* Supplier information
+* Status
+* Related inspection
+
+You can:
+
+* View shipment details
+* Filter and sort shipments
+* Track performance over time
+
+---
+
+### Inspections Module
+
+This module controls quality checks.
+
+Each inspection includes:
+
+* Results
+* Status
+* Linked shipment
+
+Critical actions are protected:
+
+* Every important action requires confirmation
+* A 2-step popup prevents mistakes
+
+This ensures data integrity and avoids accidental updates.
+
+---
+
+## System Flow
+
+1. Supplier sends shipments
+2. Shipments go through inspection
+3. Inspection results affect supplier rating
+4. Dashboard reflects overall performance
+
+This flow helps you identify weak suppliers and improve quality.
+
+---

@@ -4,25 +4,29 @@
 # --------------------------------------------------
 # 1) Go to project root
 # --------------------------------------------------
-cd /home/kabir/BUET/CSE_450_Capstone_Project_software/my-webapp
+cd my-webapp
 
 # --------------------------------------------------
-# 2) Start PostgreSQL database using Docker
+# 2) Start PostgreSQL database (local Homebrew install)
 # --------------------------------------------------
-docker compose up -d postgres
+# Make sure PostgreSQL is running:
+brew services start postgresql@16
 
-# Check if database container is running:
-docker ps
+# Create the database (first time only):
+psql -h /tmp -U dipsaha -d postgres -c "CREATE DATABASE fabric_fault_detection;"
 
-# If you want to stop it later:
-docker compose down
+# Run the table creation and data insertion scripts (first time only):
+psql -h /tmp -U dipsaha -d fabric_fault_detection -f backend/create_table.sql
+psql -h /tmp -U dipsaha -d fabric_fault_detection -f backend/insert_table.sql
+
+# If you need to reset the database later:
+psql -h /tmp -U dipsaha -d fabric_fault_detection -f backend/init_db.sql
 
 # --------------------------------------------------
 # 3) Start the backend (FastAPI)
 # --------------------------------------------------
 # Open a new terminal and run:
-cd /home/kabir/BUET/CSE_450_Capstone_Project_software/my-webapp/backend
-python3 -m venv .venv
+cd my-webapp/backend
 source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -36,7 +40,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 # 4) Start the frontend (React + Vite)
 # --------------------------------------------------
 # Open another new terminal and run:
-cd /home/kabir/BUET/CSE_450_Capstone_Project_software/my-webapp/frontend
+cd my-webapp/frontend
 npm install
 npm run dev -- --host 0.0.0.0
 
@@ -46,7 +50,8 @@ npm run dev -- --host 0.0.0.0
 # --------------------------------------------------
 # 5) Useful notes
 # --------------------------------------------------
-# - The backend expects PostgreSQL on localhost:5432 with database name fabric_fault_detection
+# - The backend connects to PostgreSQL via Unix socket (/tmp) with user dipsaha
+# - Database name: fabric_fault_detection
 # - Frontend usually runs on port 5173
 # - If port 5173 is busy, run:
 # npm run dev -- --host 0.0.0.0 --port 5174
@@ -54,12 +59,12 @@ npm run dev -- --host 0.0.0.0
 # --------------------------------------------------
 # 6) If you need to reinstall backend packages
 # --------------------------------------------------
-# cd /home/kabir/BUET/CSE_450_Capstone_Project_software/my-webapp/backend
+# cd my-webapp/backend
 # source .venv/bin/activate
 # pip install -r requirements.txt
 
 # --------------------------------------------------
 # 7) If you need to reinstall frontend packages
 # --------------------------------------------------
-# cd /home/kabir/BUET/CSE_450_Capstone_Project_software/my-webapp/frontend
+# cd my-webapp/frontend
 # npm install

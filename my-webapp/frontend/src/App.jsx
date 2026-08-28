@@ -11,6 +11,10 @@ import Inspections from "./pages/Inspections";
 import Reports from "./pages/Reports";
 import Notifications from "./pages/Notifications";
 import Account from "./pages/Account";
+import SupplierAnalytics from "./pages/SupplierAnalytics";
+import ShipmentAnalytics from "./pages/ShipmentAnalytics";
+import InspectionAnalytics from "./pages/InspectionAnalytics";
+import QualityRoiAnalytics from "./pages/QualityRoiAnalytics";
 
 function App() {
     return (
@@ -48,6 +52,15 @@ function App() {
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/notifications" element={<Notifications />} />
                 <Route path="/account" element={<Account />} />
+
+                {/* Dedicated Summary & Analytics Pages */}
+                <Route path="/analytics/suppliers" element={<SupplierAnalytics />} />
+                <Route path="/analytics/shipments" element={<ShipmentAnalytics />} />
+                <Route path="/analytics/inspections" element={<InspectionAnalytics />} />
+                <Route path="/analytics/defects" element={<InspectionAnalytics />} />
+                <Route path="/analytics/quality" element={<QualityRoiAnalytics />} />
+                <Route path="/analytics/roi" element={<QualityRoiAnalytics />} />
+                <Route path="/analytics" element={<QualityRoiAnalytics />} />
 
             </Routes>
         </BrowserRouter>

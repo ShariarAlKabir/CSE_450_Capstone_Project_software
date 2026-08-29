@@ -4,7 +4,7 @@ import axios from "axios";
 
 import OperationsShell from "../components/OperationsShell";
 import { TrendChart } from "../components/Visuals";
-import { activity, trendData } from "../data/operationsData";
+import { activity } from "../data/operationsData";
 
 const scopes = ["All", "Fabric", "Label"];
 
@@ -16,7 +16,7 @@ function Home() {
     const [suppliers, setSuppliers] = useState([]);
 
     useEffect(() => {
-        axios.get("http://localhost:8000/api/fabric/dashboard/stats")
+        axios.get("http://localhost:8000/api/fabric/dashboard/stats", { params: { scope, period } })
             .then((response) => setStats(response.data))
             .catch(() => setStats(null));
 
@@ -42,7 +42,7 @@ function Home() {
                 }));
             })
             .catch(() => setSuppliers([]));
-    }, []);
+    }, [scope, period]);
 
     const matchesScope = (item) => scope === "All" || item.scope === scope;
     const visibleInspections = inspections.filter(matchesScope);
@@ -66,24 +66,49 @@ function Home() {
                 <label className="select-control">Period <select value={period} onChange={(event) => setPeriod(event.target.value)}><option>This week</option><option>This month</option><option>This quarter</option><option>This year</option></select></label>
             </section>
 
-            <section className="kpi-grid kpi-grid--linked">
-                <Link className="kpi-card" to={analyticsLink("suppliers")}><span>Active suppliers</span><strong>{totalSuppliers}</strong><small>View supplier scorecards -&gt;</small></Link>
-                <Link className="kpi-card" to={analyticsLink("shipments")}><span>Inbound shipments</span><strong>{totalShipments}</strong><small>View lifecycle and sampling -&gt;</small></Link>
-                <Link className="kpi-card" to={analyticsLink("inspections")}><span>Inspections</span><strong>{totalInspections}</strong><small>View confidence and outcomes -&gt;</small></Link>
-                <Link className="kpi-card" to={analyticsLink("roi")}><span>Avg. quality score</span><strong>{avgQuality}</strong><small>View quality trends -&gt;</small></Link>
+            <section className="kpi-grid kpi-grid--linked" aria-label="Operational summary">
+                <Link className="kpi-card kpi-card--suppliers" to={analyticsLink("suppliers")}>
+                    <span className="kpi-card__header"><span><i />Active suppliers</span><small>{scope} / {period}</small></span>
+                    <strong>{totalSuppliers}</strong>
+                    <span className="kpi-card__meter"><i style={{ "--progress": `${Math.min(totalSuppliers * 8, 100)}%` }} /></span>
+                    <span className="kpi-card__action">Supplier scorecards <b aria-hidden="true">→</b></span>
+                </Link>
+                <Link className="kpi-card kpi-card--shipments" to={analyticsLink("shipments")}>
+                    <span className="kpi-card__header"><span><i />Inbound shipments</span><small>{scope} / {period}</small></span>
+                    <strong>{totalShipments}</strong>
+                    <span className="kpi-card__meter"><i style={{ "--progress": `${Math.min(totalShipments * 2, 100)}%` }} /></span>
+                    <span className="kpi-card__action">Lifecycle and sampling <b aria-hidden="true">→</b></span>
+                </Link>
+                <Link className="kpi-card kpi-card--inspections" to={analyticsLink("inspections")}>
+                    <span className="kpi-card__header"><span><i />Inspections</span><small>{scope} / {period}</small></span>
+                    <strong>{totalInspections}</strong>
+                    <span className="kpi-card__meter"><i style={{ "--progress": `${Math.min(totalInspections, 100)}%` }} /></span>
+                    <span className="kpi-card__action">Confidence and outcomes <b aria-hidden="true">→</b></span>
+                </Link>
+                <Link className="kpi-card kpi-card--quality" to={analyticsLink("roi")}>
+                    <span className="kpi-card__header"><span><i />Avg. quality score</span><small>{scope} / {period}</small></span>
+                    <strong>{avgQuality}<em>/100</em></strong>
+                    <span className="kpi-card__meter"><i style={{ "--progress": `${Math.min(avgQuality, 100)}%` }} /></span>
+                    <span className="kpi-card__action">Quality trends <b aria-hidden="true">→</b></span>
+                </Link>
             </section>
 
             <section className="dashboard-grid dashboard-grid--analytics dashboard-grid--calm">
-                <article className="workspace-card workspace-card--large">
-                    <div className="card-heading"><div><span className="section-label">Quality pulse / {scope}</span><h2>Accepted quality is trending above target</h2></div><Link to={analyticsLink("quality")}>Open detailed analysis</Link></div>
-                    <TrendChart values={trendData} label="Accepted quality trend" />
-                    <div className="chart-legend"><span><i className="legend-dot legend-dot--accent" />Current score <b>{Math.round(avgQuality)}</b></span><span>Target <b>92</b></span><Link to={analyticsLink("defects")}>Defect breakdown -&gt;</Link></div>
+                <article className="workspace-card workspace-card--large quality-visual-card">
+                    <div className="card-heading"><div><span className="section-label">Quality pulse / {scope}</span><h2>Quality trend</h2></div><Link className="visual-link" to={analyticsLink("quality")}>Explore <b>→</b></Link></div>
+                    <Link className="interactive-chart" to={analyticsLink("quality")} aria-label="Open detailed quality analysis">
+                        <TrendChart values={stats?.trend || [avgQuality]} label="Accepted quality trend" />
+                    </Link>
+                    <div className="chart-legend"><span><i className="legend-dot legend-dot--accent" />Current <b>{Math.round(avgQuality)}</b></span><span>Target <b>92</b></span><Link to={analyticsLink("defects")}>Defects →</Link></div>
                 </article>
                 <article className="workspace-card roi-summary-card">
-                    <div className="card-heading"><div><span className="section-label">AI vs. manual / {period}</span><h2>Resources returned to the team</h2></div><Link to={analyticsLink("roi")}>Details</Link></div>
-                    <div className="roi-summary-card__metric"><strong>{scope === "Label" ? "164 h" : "612 h"}</strong><span>Labor hours saved</span></div>
-                    <div className="comparison-strip"><div><span>Manual</span><b>{scope === "Label" ? "12" : "18"} min / item</b></div><div><span>AI assisted</span><b>4 min / item</b></div></div>
-                    <p>Open the detailed ROI timeline to filter labor, rework, reject avoidance, and payback by month, supplier, or inspection scope.</p>
+                    <div className="card-heading"><div><span className="section-label">Efficiency / {period}</span><h2>Time returned</h2></div><Link className="visual-link" to={analyticsLink("roi")}>Explore <b>→</b></Link></div>
+                    <Link className="roi-summary-card__metric" to={analyticsLink("roi")}><strong>{stats?.labor_hours_saved ?? 0}<small>h</small></strong><span>saved with AI assistance</span></Link>
+                    <div className="comparison-strip">
+                        <div><span>Manual</span><i><b style={{ "--bar": "100%" }} /></i><strong>{stats?.manual_minutes_per_item ?? 0}m</strong></div>
+                        <div><span>AI</span><i><b style={{ "--bar": `${Math.min(((stats?.ai_minutes_per_item ?? 0) / Math.max(stats?.manual_minutes_per_item ?? 1, 1)) * 100, 100)}%` }} /></i><strong>{stats?.ai_minutes_per_item ?? 0}m</strong></div>
+                    </div>
+                    <Link className="efficiency-badge" to={analyticsLink("roi")}>{Math.max((stats?.manual_minutes_per_item ?? 0) - (stats?.ai_minutes_per_item ?? 0), 0)} min faster per item <b>→</b></Link>
                 </article>
             </section>
 
@@ -97,7 +122,7 @@ function Home() {
                             <b>{supplier.score}</b>
                         </Link>
                     ))}
-                    <div className="attention-callout">Recommendation: use the supplier comparison view before allocating the next production order.</div>
+                    <Link className="attention-callout" to="/suppliers">Compare suppliers <b>→</b></Link>
                 </article>
                 <article className="workspace-card">
                     <div className="card-heading"><div><span className="section-label">Recent inspections / {scope}</span><h2>Review queue</h2></div><Link to="/inspections">Detailed queue</Link></div>
@@ -114,7 +139,18 @@ function Home() {
                 </article>
             </section>
 
-            <section className="dashboard-footer-grid"><article className="workspace-card dashboard-shortcuts"><span className="section-label">Detail shortcuts</span><div><Link to={analyticsLink("quality")}>Quality performance <b>-&gt;</b></Link><Link to={analyticsLink("defects")}>Defect causes <b>-&gt;</b></Link><Link to={analyticsLink("roi")}>Savings timeline <b>-&gt;</b></Link><Link to={analyticsLink("shipments")}>Shipment performance <b>-&gt;</b></Link></div></article><article className="workspace-card compact-activity"><div className="card-heading"><div><span className="section-label">Control room</span><h2>Latest updates</h2></div><Link to="/notifications">All alerts</Link></div>{activity.slice(0, 2).map((item) => <div className="activity-item" key={item.title}><i className={`activity-item__dot activity-item__dot--${item.tone}`} /><div><strong>{item.title}</strong><small>{item.detail}</small></div><time>{item.time}</time></div>)}</article></section>
+            <section className="dashboard-footer-grid">
+                <article className="workspace-card dashboard-shortcuts">
+                    <div className="card-heading"><div><span className="section-label">Explore</span><h2>Analytics</h2></div></div>
+                    <div>
+                        <Link to={analyticsLink("quality")}><i>Q</i><span>Quality<small>Performance</small></span><b>→</b></Link>
+                        <Link to={analyticsLink("defects")}><i>D</i><span>Defects<small>Root causes</small></span><b>→</b></Link>
+                        <Link to={analyticsLink("roi")}><i>R</i><span>ROI<small>Savings</small></span><b>→</b></Link>
+                        <Link to={analyticsLink("shipments")}><i>S</i><span>Shipments<small>Flow</small></span><b>→</b></Link>
+                    </div>
+                </article>
+                <article className="workspace-card compact-activity"><div className="card-heading"><div><span className="section-label">Live feed</span><h2>Updates</h2></div><Link to="/notifications">View all →</Link></div>{activity.slice(0, 2).map((item) => <Link to="/notifications" className="activity-item" key={item.title}><i className={"activity-item__dot activity-item__dot--" + item.tone} /><div><strong>{item.title}</strong><small>{item.detail}</small></div><time>{item.time}</time></Link>)}</article>
+            </section>
         </OperationsShell>
     );
 }

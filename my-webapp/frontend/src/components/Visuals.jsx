@@ -1,8 +1,9 @@
 export function TrendChart({ values, label = "Quality trend" }) {
-    const max = Math.max(...values);
-    const min = Math.min(...values);
-    const points = values.map((value, index) => {
-        const x = (index / (values.length - 1)) * 100;
+    const chartValues = values?.length > 1 ? values : [values?.[0] ?? 0, values?.[0] ?? 0];
+    const max = Math.max(...chartValues);
+    const min = Math.min(...chartValues);
+    const points = chartValues.map((value, index) => {
+        const x = (index / (chartValues.length - 1)) * 100;
         const y = 88 - ((value - min) / Math.max(max - min, 1)) * 62;
         return `${x},${y}`;
     }).join(" ");

@@ -12,12 +12,17 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 
 from app.pipeline import LabelInspector, StructuralGate
+from app.db import get_db
 
 
 router = APIRouter(
     prefix="/api/deterministic",
     tags=["Deterministic"]
 )
+
+
+def ensure_label_table(cur):
+    cur.execute("""CREATE TABLE IF NOT EXISTS label_inspections (label_inspection_id SERIAL PRIMARY KEY, report_id UUID UNIQUE NOT NULL, verdict VARCHAR(50) NOT NULL, ssim_score NUMERIC(5,4), hotspot_count INT NOT NULL DEFAULT 0, inspected_at TIMESTAMP DEFAULT NOW())""")
 
 
 # --------------------------------------------------
@@ -511,6 +516,16 @@ async def inspect_label(
             "width": target_size[0],
             "height": target_size[1]
         }
+
+        conn = get_db()
+        try:
+            with conn.cursor() as cur:
+                ensure_label_table(cur)
+                gate2 = result.get("gate2") or {}
+                cur.execute("INSERT INTO label_inspections (report_id, verdict, ssim_score, hotspot_count) VALUES (%s, %s, %s, %s)", (report_id, result["verdict"], gate2.get("ssim_score"), gate2.get("hotspot_count", 0)))
+            conn.commit()
+        finally:
+            conn.close()
 
         return result
 

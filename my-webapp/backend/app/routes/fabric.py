@@ -141,7 +141,7 @@ def get_shipments():
         conn = get_db()
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT shipment_id, supplier_id, shipment_code, fabric_type, color, sampling_stage, quality_score FROM shipments ORDER BY shipment_id DESC"
+                "SELECT sh.shipment_id, sh.supplier_id, sh.shipment_code, sh.fabric_type, sh.color, sh.sampling_stage, sh.quality_score, sh.total_rolls, COALESCE(r.inspected_rolls, 0) AS inspected_rolls, GREATEST(sh.total_rolls - COALESCE(r.inspected_rolls, 0), 0) AS uninspected_rolls FROM shipments sh LEFT JOIN (SELECT fr.shipment_id, COUNT(i.inspection_id) AS inspected_rolls FROM fabric_rolls fr JOIN inspections i ON i.roll_id = fr.roll_id GROUP BY fr.shipment_id) r ON r.shipment_id = sh.shipment_id ORDER BY sh.shipment_id DESC"
             )
             rows = cur.fetchall()
             return {"shipments": [dict(row) for row in rows]}
@@ -590,9 +590,9 @@ def get_dashboard_stats(scope: str = Query("All"), period: str = Query("This mon
             cur.execute("SELECT COUNT(*) AS total FROM suppliers")
             total_suppliers = cur.fetchone()["total"]
 
-            total_shipments = cur.execute("SELECT COUNT(*) AS total FROM shipments WHERE COALESCE(received_date, shipment_date) >= CURRENT_DATE - %s::interval", (interval,)) or cur.fetchone()["total"]
+            total_shipments = cur.execute("SELECT COUNT(*) AS total FROM shipments", (interval,)) or cur.fetchone()["total"]
 
-            total_inspections = cur.execute("SELECT COUNT(*) AS total FROM inspections WHERE inspected_at >= NOW() - %s::interval", (interval,)) or cur.fetchone()["total"]
+            total_inspections = cur.execute("SELECT COUNT(*) AS total FROM inspections", (interval,)) or cur.fetchone()["total"]
 
             cur.execute("SELECT COUNT(*) AS total FROM fabric_rolls")
             total_rolls = cur.fetchone()["total"]
@@ -624,16 +624,16 @@ def get_dashboard_stats(scope: str = Query("All"), period: str = Query("This mon
             defect_breakdown = [{"label": row["defect_type"], "value": int(row["count"])} for row in defect_rows]
 
             # Average quality score from recent shipments for trend
-            cur.execute("SELECT ROUND(AVG(quality_score)::numeric, 1) AS avg_score FROM shipments WHERE quality_score IS NOT NULL AND COALESCE(received_date, shipment_date) >= CURRENT_DATE - %s::interval", (interval,))
+            cur.execute("SELECT ROUND(AVG(quality_score)::numeric, 1) AS avg_score FROM shipments WHERE quality_score IS NOT NULL", (interval,))
             avg_quality = float(cur.fetchone()["avg_score"] or 0)
 
-            cur.execute("SELECT COUNT(*) AS total, ROUND(AVG(ssim_score * 100)::numeric, 1) AS avg_score FROM label_inspections WHERE inspected_at >= NOW() - %s::interval", (interval,))
+            cur.execute("SELECT COUNT(*) AS total, ROUND(AVG(ssim_score * 100)::numeric, 1) AS avg_score FROM label_inspections", (interval,))
             label_stats = cur.fetchone()
             label_inspections = int(label_stats["total"] or 0)
             label_quality = float(label_stats["avg_score"] or 0)
 
             if scope == "Label":
-                total_suppliers = 0
+                total_suppliers = total_suppliers
                 total_shipments = 0
                 total_inspections = label_inspections
                 total_rolls = 0
@@ -644,6 +644,10 @@ def get_dashboard_stats(scope: str = Query("All"), period: str = Query("This mon
                 combined = int(total_inspections) + label_inspections
                 avg_quality = round(((avg_quality * int(total_inspections)) + (label_quality * label_inspections)) / combined, 1) if combined else 0
                 total_inspections = combined
+
+            cur.execute("SELECT ROUND(AVG(CASE WHEN grade = 'A' THEN 95 WHEN grade = 'B' THEN 88 WHEN grade = 'C' THEN 78 ELSE 65 END)::numeric, 1) AS score FROM inspections GROUP BY date_trunc('month', inspected_at) ORDER BY date_trunc('month', inspected_at)")
+            trend_rows = cur.fetchall()
+            trend = [float(row["score"] or 0) for row in trend_rows] or [avg_quality]
 
             return {
                 "total_suppliers": int(total_suppliers),
@@ -658,7 +662,7 @@ def get_dashboard_stats(scope: str = Query("All"), period: str = Query("This mon
                     {"label": "Reject", "value": grade_dist["Reject"], "tone": "grade-r"},
                 ],
                 "defect_breakdown": defect_breakdown,
-                "trend": [avg_quality],
+                "trend": trend,
                 "labor_hours_saved": round(int(total_inspections) * 14 / 60, 1),
                 "manual_minutes_per_item": 18 if scope != "Label" else 12,
                 "ai_minutes_per_item": 4,
@@ -788,3 +792,46 @@ def update_supplier(supplier_id: int, payload: Dict[str, Any]):
         except Exception:
             pass
 
+
+@router.post('/suppliers')
+def create_supplier(payload: Dict[str, Any]):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO suppliers (name,country,city,contact_person,contact_email,contact_phone,supplier_rating) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *", (payload.get('name'),payload.get('country'),payload.get('city'),payload.get('contact_person'),payload.get('contact_email'),payload.get('contact_phone'),payload.get('supplier_rating',85)))
+            row=cur.fetchone(); conn.commit(); return {'supplier': _normalize_row(dict(row))}
+    finally: conn.close()
+
+@router.post('/shipments')
+def create_shipment(payload: Dict[str, Any]):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO shipments (supplier_id,shipment_code,shipment_date,received_date,total_rolls,fabric_type,color,sampling_stage,quality_score,notes) VALUES (%s,%s,COALESCE(%s,CURRENT_DATE),%s,%s,%s,%s,COALESCE(%s,'Initial')::sampling_stage_enum,%s,%s) RETURNING *", (payload.get('supplier_id'),payload.get('shipment_code'),payload.get('shipment_date'),payload.get('received_date'),payload.get('total_rolls',1),payload.get('fabric_type'),payload.get('color'),payload.get('sampling_stage'),payload.get('quality_score'),payload.get('notes')))
+            row=cur.fetchone(); conn.commit(); return {'shipment': _normalize_row(dict(row))}
+    finally: conn.close()
+
+@router.get('/inspections/{inspection_id}')
+def inspection_detail(inspection_id: int):
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT i.inspection_id, i.total_images_processed, i.total_defects_found, i.total_penalty_points, i.points_per_100_yards, i.grade, i.model_version, i.status, i.inspected_at, fr.roll_code, fr.roll_length_yards, sh.shipment_code, s.name AS supplier FROM inspections i JOIN fabric_rolls fr ON fr.roll_id=i.roll_id JOIN shipments sh ON sh.shipment_id=fr.shipment_id JOIN suppliers s ON s.supplier_id=sh.supplier_id WHERE i.inspection_id=%s""", (inspection_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail='Inspection not found')
+            cur.execute("SELECT defect_id, image_index, defect_type, severity, confidence_score, position_x, position_y FROM defects WHERE inspection_id=%s ORDER BY defect_id", (inspection_id,))
+            defects = [_normalize_row(dict(item)) for item in cur.fetchall()]
+            cur.execute("SELECT defect_type, COUNT(*) AS count FROM defects WHERE inspection_id=%s GROUP BY defect_type ORDER BY count DESC, defect_type", (inspection_id,))
+            summary = [{"class": item["defect_type"], "count": int(item["count"])} for item in cur.fetchall()]
+            penalty = round(sum(float(d.get("severity") or 0) * float(d.get("confidence_score") or 0) * 10 for d in defects), 2)
+            length = float(row.get("roll_length_yards") or 0)
+            result = _normalize_row(dict(row))
+            result["total_defects_found"] = len(defects)
+            result["total_penalty_points"] = penalty
+            result["points_per_100_yards"] = round((penalty * 100) / length, 2) if length else 0
+            result["defects"] = defects
+            result["defect_summary"] = summary
+            return result
+    finally:
+        conn.close()

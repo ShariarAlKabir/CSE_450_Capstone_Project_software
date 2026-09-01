@@ -102,13 +102,13 @@ function Home() {
                     <div className="chart-legend"><span><i className="legend-dot legend-dot--accent" />Current <b>{Math.round(avgQuality)}</b></span><span>Target <b>92</b></span><Link to={analyticsLink("defects")}>Defects →</Link></div>
                 </article>
                 <article className="workspace-card roi-summary-card">
-                    <div className="card-heading"><div><span className="section-label">Efficiency / {period}</span><h2>Time returned</h2></div><Link className="visual-link" to={analyticsLink("roi")}>Explore <b>→</b></Link></div>
-                    <Link className="roi-summary-card__metric" to={analyticsLink("roi")}><strong>{stats?.labor_hours_saved ?? 0}<small>h</small></strong><span>saved with AI assistance</span></Link>
+                    <div className="card-heading"><div><span className="section-label">Efficiency / {period}</span><h2>Time returned</h2></div><Link className="visual-link" to={analyticsLink("quality")}>Explore <b>→</b></Link></div>
+                    <Link className="roi-summary-card__metric" to={analyticsLink("quality")}><strong>{stats?.labor_hours_saved ?? 0}<small>h</small></strong><span>saved with AI assistance</span></Link>
                     <div className="comparison-strip">
                         <div><span>Manual</span><i><b style={{ "--bar": "100%" }} /></i><strong>{stats?.manual_minutes_per_item ?? 0}m</strong></div>
                         <div><span>AI</span><i><b style={{ "--bar": `${Math.min(((stats?.ai_minutes_per_item ?? 0) / Math.max(stats?.manual_minutes_per_item ?? 1, 1)) * 100, 100)}%` }} /></i><strong>{stats?.ai_minutes_per_item ?? 0}m</strong></div>
                     </div>
-                    <Link className="efficiency-badge" to={analyticsLink("roi")}>{Math.max((stats?.manual_minutes_per_item ?? 0) - (stats?.ai_minutes_per_item ?? 0), 0)} min faster per item <b>→</b></Link>
+                    <Link className="efficiency-badge" to={analyticsLink("quality")}>{Math.max((stats?.manual_minutes_per_item ?? 0) - (stats?.ai_minutes_per_item ?? 0), 0)} min faster per item <b>→</b></Link>
                 </article>
             </section>
 

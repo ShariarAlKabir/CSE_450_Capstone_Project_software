@@ -8,6 +8,7 @@ import NonDeterministic from "./pages/NonDeterministic";
 import Suppliers from "./pages/Suppliers";
 import Shipments from "./pages/Shipments";
 import Inspections from "./pages/Inspections";
+import InspectionDetail from "./pages/InspectionDetail";
 import Reports from "./pages/Reports";
 import Notifications from "./pages/Notifications";
 import Account from "./pages/Account";
@@ -49,6 +50,7 @@ function App() {
                 <Route path="/suppliers" element={<Suppliers />} />
                 <Route path="/shipments" element={<Shipments />} />
                 <Route path="/inspections" element={<Inspections />} />
+                <Route path="/inspections/:inspectionId" element={<InspectionDetail />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/notifications" element={<Notifications />} />
                 <Route path="/account" element={<Account />} />

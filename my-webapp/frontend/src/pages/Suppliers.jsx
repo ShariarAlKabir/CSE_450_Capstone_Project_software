@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
+import Modal from "../components/Modal";
 import { ScoreRing } from "../components/Visuals";
 
 const tierClass = (tier) => (tier || "standard").toLowerCase();
@@ -35,6 +36,7 @@ const normalizeSupplier = (row, index) => {
         copq: Math.round((100 - score) * 160 + 1200),
         onTime: Math.max(60, Math.min(100, Math.round(score + 2))),
         spend: 15 + index * 5,
+        email: row.contact_email || "", phone: row.contact_phone || "",
         fingerprint: "Database-sourced supplier profile",
         renewal: "Live data",
         location: `${row.city || "N/A"}, ${row.country || "N/A"}`,
@@ -54,6 +56,50 @@ function Suppliers() {
     const [suppliers, setSuppliers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [scope, setScope] = useState("All");
+    const [showAddSupplier, setShowAddSupplier] = useState(false);
+    const [profileTab, setProfileTab] = useState("overview");
+    const [copied, setCopied] = useState("");
+    const [saving, setSaving] = useState(false);
+    const [formError, setFormError] = useState("");
+    const [form, setForm] = useState({
+        name: "", country: "Bangladesh", city: "Dhaka", contact_person: "", contact_email: "", contact_phone: "", supplier_rating: 85,
+    });
+    const updateField = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
+    const copyField = async (label, value) => {
+        if (!value) return;
+        try {
+            await navigator.clipboard.writeText(value);
+        } catch {
+            const textarea = document.createElement("textarea");
+            textarea.value = value;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand("copy");
+            document.body.removeChild(textarea);
+        }
+        setCopied(label);
+        window.setTimeout(() => setCopied(""), 1600);
+    };
+    const addSupplier = async (event) => {
+        event.preventDefault();
+        if (!form.name.trim()) {
+            setFormError("Company name is required.");
+            return;
+        }
+        setSaving(true);
+        setFormError("");
+        try {
+            await axios.post("http://localhost:8000/api/fabric/suppliers", {
+                ...form,
+                supplier_rating: Number(form.supplier_rating) || 85,
+            });
+            setShowAddSupplier(false);
+            window.location.reload();
+        } catch (error) {
+            setFormError(error.response?.data?.detail || "Could not add supplier. Please try again.");
+            setSaving(false);
+        }
+    };
 
     useEffect(() => {
         axios.get("http://localhost:8000/api/fabric/suppliers")
@@ -89,14 +135,33 @@ function Suppliers() {
 
     if (loading && suppliers.length === 0) {
         return (
-            <OperationsShell eyebrow="Supplier intelligence" title="Loading supplier data..." actions={<button className="button button-primary" onClick={() => window.print()}>Export negotiation packet</button>}>
+            <OperationsShell eyebrow="Supplier intelligence" title="Loading supplier data..." actions={<><button className="button button-primary" onClick={() => setShowAddSupplier(true)}>Add supplier</button><button className="button button-quiet" onClick={() => window.print()}>Export negotiation packet</button></>}>
                 <section className="workspace-card"><p>Fetching live supplier data from the backend.</p></section>
+                {showAddSupplier && (
+                    <Modal eyebrow="Supplier intelligence" title="Add supplier" onCancel={() => setShowAddSupplier(false)}>
+                        <form className="modal-form" onSubmit={addSupplier}>
+                            <label>Company name *<input required value={form.name} onChange={updateField("name")} placeholder="e.g. Bangladesh Textile Co." /></label>
+                            <label>Country<input value={form.country} onChange={updateField("country")} placeholder="e.g. Bangladesh" /></label>
+                            <label>City<input value={form.city} onChange={updateField("city")} placeholder="e.g. Dhaka" /></label>
+                            <label>Supplier rating (0-100)<input type="number" min="0" max="100" value={form.supplier_rating} onChange={updateField("supplier_rating")} /></label>
+                            <label>Contact person<input value={form.contact_person} onChange={updateField("contact_person")} placeholder="e.g. Rahim Uddin" /></label>
+                            <label>Contact email<input type="email" value={form.contact_email} onChange={updateField("contact_email")} placeholder="e.g. rahim@textile.com" /></label>
+                            <label>Contact phone<input value={form.contact_phone} onChange={updateField("contact_phone")} placeholder="e.g. +880 1700 000000" /></label>
+                            {formError && <p className="modal-form__error">{formError}</p>}
+                            <div className="modal-form__actions">
+                                <button type="button" className="button button-quiet" onClick={() => setShowAddSupplier(false)}>Cancel</button>
+                                <button type="submit" className="button button-primary" disabled={saving}>{saving ? "Adding..." : "Add supplier"}</button>
+                            </div>
+                        </form>
+                    </Modal>
+                )}
             </OperationsShell>
         );
     }
 
     return (
-        <OperationsShell eyebrow="Supplier intelligence" title="Manage the quality of your source." actions={<button className="button button-primary" onClick={() => window.print()}>Export negotiation packet</button>}>
+        <>
+        <OperationsShell eyebrow="Supplier intelligence" title="Manage the quality of your source." actions={<><button className="button button-primary" onClick={() => setShowAddSupplier(true)}>Add supplier</button><button className="button button-quiet" onClick={() => window.print()}>Export negotiation packet</button></>}>
             <section className="workspace-card supplier-filterbar">
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a supplier" aria-label="Find a supplier" />
                 <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
@@ -128,7 +193,24 @@ function Suppliers() {
                             <div>
                                 <span className="section-label">Supplier profile</span>
                                 <h2>{selected.name}</h2>
-                                <p>{selected.location} · Contact: {selected.contact}</p>
+                                <p>{selected.location}</p>
+                                <div className="profile-contact-chips">
+                                    <button className="profile-chip" type="button" onClick={() => copyField("email", selected.email)} title="Copy email address" disabled={!selected.email}>
+                                        <span className="profile-chip__label">Email</span>
+                                        <span className="profile-chip__value">{selected.email || "Not provided"}</span>
+                                        <b>{copied === "email" ? "Copied!" : "Copy"}</b>
+                                    </button>
+                                    <button className="profile-chip" type="button" onClick={() => copyField("phone", selected.phone)} title="Copy phone number" disabled={!selected.phone}>
+                                        <span className="profile-chip__label">Phone</span>
+                                        <span className="profile-chip__value">{selected.phone || "Not provided"}</span>
+                                        <b>{copied === "phone" ? "Copied!" : "Copy"}</b>
+                                    </button>
+                                    <a className="profile-chip profile-chip--link" href={`mailto:${selected.email}`} title="Open email client" aria-disabled={!selected.email}>
+                                        <span className="profile-chip__label">Contact person</span>
+                                        <span className="profile-chip__value">{selected.contact}</span>
+                                        <b>Mail</b>
+                                    </a>
+                                </div>
                             </div>
                             <ScoreRing value={selected.score} />
                         </div>
@@ -137,30 +219,73 @@ function Suppliers() {
                             <span className={`trend-label trend-label--${selected.trend.toLowerCase()}`}>{selected.trend}</span>
                             <span>Auto-updated quality rating</span>
                         </div>
-                        <div className="score-breakdown">
-                            <div><span>Quality</span><b>{selected.quality}</b><i style={{ width: `${selected.quality}%` }} /></div>
-                            <div><span>Cost</span><b>{selected.cost}</b><i style={{ width: `${selected.cost}%` }} /></div>
-                            <div><span>Delivery</span><b>{selected.delivery}</b><i style={{ width: `${selected.delivery}%` }} /></div>
+                        <div className="profile-tabs" role="tablist" aria-label="Supplier details">
+                            {[["overview", "Overview"], ["contact", "Contact"], ["history", "Quality history"]].map(([key, label]) => (
+                                <button key={key} role="tab" aria-selected={profileTab === key} className={profileTab === key ? "is-active" : ""} onClick={() => setProfileTab(key)}>{label}</button>
+                            ))}
                         </div>
-                        <div className="heatmap-section">
-                            <span className="section-label">Quality history / last 12 lots</span>
-                            <div className="quality-heatmap">{selected.heatmap.map((grade, index) => <i key={`${grade}-${index}`} className={`heatmap-cell heatmap-cell--${grade}`} title={`Lot ${index + 1}: ${grade.toUpperCase()}`} />)}</div>
-                            <small>A: pass · B: minor issue · C: needs review · R: rejected</small>
-                        </div>
-                        <div className="supplier-stat-grid">
-                            <div><span>Defect fingerprint</span><b>{selected.fingerprint}</b></div>
-                            <div><span>COPQ this quarter</span><b>${selected.copq.toLocaleString()}</b></div>
-                            <div><span>Effective accepted yard</span><b>${selected.effectiveCost.toFixed(2)}</b></div>
-                            <div><span>On-time delivery</span><b>{selected.onTime}%</b></div>
-                        </div>
-                        <div className="profile-recommendation">
-                            <strong>Switch recommendation</strong>
-                            <p>Current supplier quality is being updated from the live fabric inspection database.</p>
-                        </div>
-                        <div className="profile-footer">
-                            <span>Contract renewal: <b>{selected.renewal}</b></span>
-                            <span>Spend coverage: <b>${selected.spend}k</b></span>
-                        </div>
+                        {profileTab === "overview" && (
+                            <div className="profile-tab-panel">
+                                <div className="score-breakdown">
+                                    <div><span>Quality</span><b>{selected.quality}</b><i style={{ width: `${selected.quality}%` }} /></div>
+                                    <div><span>Cost</span><b>{selected.cost}</b><i style={{ width: `${selected.cost}%` }} /></div>
+                                    <div><span>Delivery</span><b>{selected.delivery}</b><i style={{ width: `${selected.delivery}%` }} /></div>
+                                </div>
+                                <div className="supplier-stat-grid">
+                                    <div><span>Defect fingerprint</span><b>{selected.fingerprint}</b></div>
+                                    <div><span>COPQ this quarter</span><b>${selected.copq.toLocaleString()}</b></div>
+                                    <div><span>Effective accepted yard</span><b>${selected.effectiveCost.toFixed(2)}</b></div>
+                                    <div><span>On-time delivery</span><b>{selected.onTime}%</b></div>
+                                </div>
+                                <div className="profile-recommendation">
+                                    <strong>Switch recommendation</strong>
+                                    <p>Current supplier quality is being updated from the live fabric inspection database.</p>
+                                </div>
+                                <div className="profile-footer">
+                                    <span>Contract renewal: <b>{selected.renewal}</b></span>
+                                    <span>Spend coverage: <b>${selected.spend}k</b></span>
+                                </div>
+                            </div>
+                        )}
+                        {profileTab === "contact" && (
+                            <div className="profile-tab-panel">
+                                <div className="contact-directory">
+                                    <div className="contact-directory__row">
+                                        <span className="avatar">{selected.initials}</span>
+                                        <div><b>Primary contact</b><small>Day-to-day account owner</small></div>
+                                        <strong>{selected.contact}</strong>
+                                    </div>
+                                    <div className="contact-directory__row">
+                                        <span className="avatar">@</span>
+                                        <div><b>Email address</b><small>{selected.email || "Not provided"}</small></div>
+                                        <button className="button button-ghost" type="button" onClick={() => copyField("email", selected.email)} disabled={!selected.email}>{copied === "email" ? "Copied!" : "Copy"}</button>
+                                    </div>
+                                    <div className="contact-directory__row">
+                                        <span className="avatar">#</span>
+                                        <div><b>Phone number</b><small>{selected.phone || "Not provided"}</small></div>
+                                        <button className="button button-ghost" type="button" onClick={() => copyField("phone", selected.phone)} disabled={!selected.phone}>{copied === "phone" ? "Copied!" : "Copy"}</button>
+                                    </div>
+                                    <div className="contact-directory__row">
+                                        <span className="avatar">&#9873;</span>
+                                        <div><b>Location</b><small>{selected.location}</small></div>
+                                        <strong>{selected.location.split(", ").slice(-1)[0]}</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        {profileTab === "history" && (
+                            <div className="profile-tab-panel">
+                                <div className="heatmap-section">
+                                    <span className="section-label">Quality history / last 12 lots</span>
+                                    <div className="quality-heatmap">{selected.heatmap.map((grade, index) => <i key={`${grade}-${index}`} className={`heatmap-cell heatmap-cell--${grade}`} title={`Lot ${index + 1}: ${grade.toUpperCase()}`} />)}</div>
+                                    <small>A: pass · B: minor issue · C: needs review · R: rejected</small>
+                                </div>
+                                <div className="profile-recommendation">
+                                    <strong>Trend outlook</strong>
+                                    <p>{selected.trend} performance with {selected.score} overall. Monitor the next lot for any quality drift before the renewal discussion.</p>
+                                </div>
+                            </div>
+                        )}
                     </article>
                 ) : null}
             </section>
@@ -195,6 +320,25 @@ function Suppliers() {
                 </article>
             </section>
         </OperationsShell>
+        {showAddSupplier && (
+            <Modal eyebrow="Supplier intelligence" title="Add supplier" onCancel={() => setShowAddSupplier(false)}>
+                <form className="modal-form" onSubmit={addSupplier}>
+                    <label>Company name *<input required value={form.name} onChange={updateField("name")} placeholder="e.g. Bangladesh Textile Co." /></label>
+                    <label>Country<input value={form.country} onChange={updateField("country")} placeholder="e.g. Bangladesh" /></label>
+                    <label>City<input value={form.city} onChange={updateField("city")} placeholder="e.g. Dhaka" /></label>
+                    <label>Supplier rating (0-100)<input type="number" min="0" max="100" value={form.supplier_rating} onChange={updateField("supplier_rating")} /></label>
+                    <label>Contact person<input value={form.contact_person} onChange={updateField("contact_person")} placeholder="e.g. Rahim Uddin" /></label>
+                    <label>Contact email<input type="email" value={form.contact_email} onChange={updateField("contact_email")} placeholder="e.g. rahim@textile.com" /></label>
+                    <label>Contact phone<input value={form.contact_phone} onChange={updateField("contact_phone")} placeholder="e.g. +880 1700 000000" /></label>
+                    {formError && <p className="modal-form__error">{formError}</p>}
+                    <div className="modal-form__actions">
+                        <button type="button" className="button button-quiet" onClick={() => setShowAddSupplier(false)}>Cancel</button>
+                        <button type="submit" className="button button-primary" disabled={saving}>{saving ? "Adding..." : "Add supplier"}</button>
+                    </div>
+                </form>
+            </Modal>
+        )}
+        </>
     );
 }
 

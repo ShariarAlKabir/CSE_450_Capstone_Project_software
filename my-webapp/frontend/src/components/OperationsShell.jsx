@@ -13,7 +13,6 @@ const navigation = [
 
 const hiddenPages = [
     { to: "/analytics/quality", label: "Quality trend" },
-    { to: "/analytics/roi", label: "Time returned" },
     { to: "/analytics/defects", label: "Defects" },
     { to: "/analytics/suppliers", label: "Supplier scorecards" },
     { to: "/analytics/shipments", label: "Shipment lifecycle" },

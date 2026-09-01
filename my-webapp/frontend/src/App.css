@@ -182,3 +182,4 @@
     border-right-color: var(--border);
   }
 }
+.supplier-company-info{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}.supplier-company-info span{display:flex;flex-direction:column;gap:3px;font-size:.82rem;color:var(--muted)}.supplier-company-info b{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink)}

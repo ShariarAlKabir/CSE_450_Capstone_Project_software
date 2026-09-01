@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 
 import OperationsShell from "../components/OperationsShell";
+import ScopeToggle from "../components/ScopeToggle";
 
 const SEVERITY_INFO = {
     "Hole": { severity: 4, desc: "Critical weave opening / tear" },
@@ -21,6 +22,7 @@ export default function InspectionAnalytics() {
     const [gradeFilter, setGradeFilter] = useState("All");
     const [selectedDefectType, setSelectedDefectType] = useState("All");
     const [searchQuery, setSearchQuery] = useState("");
+    const [scope, setScope] = useState("All");
 
     useEffect(() => {
         Promise.all([
@@ -53,8 +55,18 @@ export default function InspectionAnalytics() {
         return defectBreakdown.reduce((acc, d) => acc + d.value, 0);
     }, [defectBreakdown]);
 
+    const scopedInspections = useMemo(() => {
+        return inspections.filter((i) => scope === "All" || i.scope === scope);
+    }, [inspections, scope]);
+
+    const scopeCounts = {
+        All: inspections.length,
+        Fabric: inspections.filter((i) => i.scope === "Fabric").length,
+        Label: inspections.filter((i) => i.scope === "Label").length,
+    };
+
     const filtered = useMemo(() => {
-        return inspections.filter((i) => {
+        return scopedInspections.filter((i) => {
             const matchesStatus = statusFilter === "All" || i.status === statusFilter;
             const matchesGrade = gradeFilter === "All" || i.grade === gradeFilter;
             const matchesSearch = i.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -62,21 +74,21 @@ export default function InspectionAnalytics() {
                 i.supplier.toLowerCase().includes(searchQuery.toLowerCase());
             return matchesStatus && matchesGrade && matchesSearch;
         });
-    }, [inspections, statusFilter, gradeFilter, searchQuery]);
+    }, [scopedInspections, statusFilter, gradeFilter, searchQuery]);
 
     const gradeStats = useMemo(() => {
-        const total = inspections.length || 1;
-        const aCount = inspections.filter((i) => i.grade === "A").length;
-        const bCount = inspections.filter((i) => i.grade === "B").length;
-        const cCount = inspections.filter((i) => i.grade === "C").length;
-        const rCount = inspections.filter((i) => i.grade === "Reject").length;
+        const total = scopedInspections.length || 1;
+        const aCount = scopedInspections.filter((i) => i.grade === "A").length;
+        const bCount = scopedInspections.filter((i) => i.grade === "B").length;
+        const cCount = scopedInspections.filter((i) => i.grade === "C").length;
+        const rCount = scopedInspections.filter((i) => i.grade === "Reject").length;
         return {
             a: { count: aCount, pct: Math.round((aCount / total) * 100) },
             b: { count: bCount, pct: Math.round((bCount / total) * 100) },
             c: { count: cCount, pct: Math.round((cCount / total) * 100) },
             r: { count: rCount, pct: Math.round((rCount / total) * 100) },
         };
-    }, [inspections]);
+    }, [scopedInspections]);
 
     return (
         <OperationsShell
@@ -93,7 +105,7 @@ export default function InspectionAnalytics() {
             <section className="kpi-grid">
                 <div className="kpi-card">
                     <span>Total Inspected Rolls</span>
-                    <strong>{stats?.total_inspections ?? inspections.length}</strong>
+                    <strong>{scope === "All" ? (stats?.total_inspections ?? scopedInspections.length) : scopedInspections.length}</strong>
                     <small>100% camera scanned</small>
                 </div>
                 <div className="kpi-card">
@@ -298,6 +310,7 @@ export default function InspectionAnalytics() {
                                 </button>
                             ))}
                         </div>
+                        <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
                     </div>
                 </div>
 

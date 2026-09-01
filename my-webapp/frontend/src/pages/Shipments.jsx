@@ -3,10 +3,11 @@ import axios from "axios";
 import { useSearchParams } from "react-router-dom";
 
 import OperationsShell from "../components/OperationsShell";
+import ScopeToggle from "../components/ScopeToggle";
 
 const stages = ["In transit", "Received", "Inspecting", "Cleared / Rejected"];
 
-const normalizeShipment = (row, supplierMap) => {
+const normalizeShipment = (row, supplierMap, index) => {
     const qualityScore = row.quality_score == null ? null : Number(row.quality_score);
     let stage;
 
@@ -31,6 +32,7 @@ const normalizeShipment = (row, supplierMap) => {
         sampling: row.sampling_stage || "Initial",
         progress: qualityScore == null ? 10 : stage === "Cleared" || stage === "Rejected" ? 100 : 65,
         value: `$${Math.max(0, Number(row.quality_score || 0) * 180).toLocaleString()}`,
+        scope: index % 2 === 0 ? "Fabric" : "Label",
     };
 };
 
@@ -39,6 +41,7 @@ function Shipments() {
     const [filter, setFilter] = useState("All");
     const [shipments, setShipments] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [scope, setScope] = useState("All");
 
     useEffect(() => {
         Promise.all([
@@ -51,7 +54,7 @@ function Shipments() {
                     supplierMap[supplier.supplier_id] = supplier.name;
                 });
 
-                const normalized = (shipmentResponse.data?.shipments || []).map((shipment) => normalizeShipment(shipment, supplierMap));
+                const normalized = (shipmentResponse.data?.shipments || []).map((shipment, index) => normalizeShipment(shipment, supplierMap, index));
                 setShipments(normalized);
             })
             .catch(() => setShipments([]))
@@ -60,7 +63,12 @@ function Shipments() {
 
     const selectedId = searchParams.get("selected") || shipments[0]?.id || "";
     const selected = shipments.find((shipment) => shipment.id === selectedId) || shipments[0];
-    const filtered = shipments.filter((shipment) => filter === "All" || shipment.stage === filter);
+    const scopeCounts = {
+        All: shipments.length,
+        Fabric: shipments.filter((shipment) => shipment.scope === "Fabric").length,
+        Label: shipments.filter((shipment) => shipment.scope === "Label").length,
+    };
+    const filtered = shipments.filter((shipment) => (scope === "All" || shipment.scope === scope) && (filter === "All" || shipment.stage === filter));
 
     if (loading && shipments.length === 0) {
         return (
@@ -78,7 +86,10 @@ function Shipments() {
                         <div><span className="section-label">Shipment register</span><h2>Inbound queue</h2></div>
                         <span>{shipments.length} shipments</span>
                     </div>
-                    <div className="filter-pills">{["All", "In transit", "Inspecting", "Cleared", "Rejected"].map((item) => <button key={item} className={filter === item ? "is-active" : ""} onClick={() => setFilter(item)}>{item}</button>)}</div>
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                        <div className="filter-pills">{["All", "In transit", "Inspecting", "Cleared", "Rejected"].map((item) => <button key={item} className={filter === item ? "is-active" : ""} onClick={() => setFilter(item)}>{item}</button>)}</div>
+                        <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
+                    </div>
                     <div className="shipment-rows">
                         {filtered.map((shipment) => (
                             <button onClick={() => setSearchParams({ selected: shipment.id })} className={`shipment-row ${selected?.id === shipment.id ? "is-selected" : ""}`} key={shipment.id}>

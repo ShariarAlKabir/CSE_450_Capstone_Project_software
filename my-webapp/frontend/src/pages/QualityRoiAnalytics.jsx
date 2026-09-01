@@ -1,16 +1,36 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 
 import OperationsShell from "../components/OperationsShell";
+import ScopeToggle from "../components/ScopeToggle";
 import { TrendChart } from "../components/Visuals";
 import { trendData } from "../data/operationsData";
 
+const SCOPE_CONFIG = {
+    All: { quality: 94.2, manual: 18, baseline: 78.0, gain: 16.2, trend: trendData },
+    Fabric: { quality: 94.2, manual: 18, baseline: 78.0, gain: 16.2, trend: trendData },
+    Label: { quality: 96.5, manual: 12, baseline: 82.0, gain: 14.5, trend: [80, 83, 84, 86, 87, 89, 90, 92, 93, 94, 95, 96] },
+};
+
 export default function QualityRoiAnalytics() {
+    const location = useLocation();
     const [activeTab, setActiveTab] = useState("roi"); // "roi" | "trends" | "copq"
+    const [scope, setScope] = useState("All");
     const [rollsPerMonth, setRollsPerMonth] = useState(180);
     const [manualMinutesPerRoll, setManualMinutesPerRoll] = useState(18);
     const [hourlyLaborCost, setHourlyLaborCost] = useState(25);
     const [rejectionCostPerRoll, setRejectionCostPerRoll] = useState(320);
+    const active = SCOPE_CONFIG[scope];
+
+    const changeScope = (next) => {
+        setScope(next);
+        setManualMinutesPerRoll(SCOPE_CONFIG[next].manual);
+    };
+
+    useEffect(() => {
+        if (location.pathname.includes("quality")) setActiveTab("trends");
+        else if (location.pathname.includes("roi")) setActiveTab("roi");
+    }, [location.pathname]);
 
     // Dynamic calculations based on simulator sliders
     const aiMinutesPerRoll = 4;
@@ -58,8 +78,8 @@ export default function QualityRoiAnalytics() {
                 </div>
                 <div className="kpi-card">
                     <span>Accepted Quality Score</span>
-                    <strong>94.2<small style={{ fontSize: "1rem" }}>/100</small></strong>
-                    <small className="positive">+6.2 pts above manual baseline</small>
+                    <strong>{active.quality}<small style={{ fontSize: "1rem" }}>/100</small></strong>
+                    <small className="positive">+{(active.quality - active.baseline).toFixed(1)} pts above manual baseline</small>
                 </div>
             </section>
 
@@ -77,6 +97,8 @@ export default function QualityRoiAnalytics() {
                         Cost of Poor Quality (COPQ)
                     </button>
                 </div>
+                <span className="section-label" style={{ marginLeft: "auto", marginRight: "6px" }}>Scope:</span>
+                <ScopeToggle value={scope} onChange={changeScope} />
             </section>
 
             {/* Tab 1: Interactive ROI Simulator */}
@@ -230,11 +252,11 @@ export default function QualityRoiAnalytics() {
                             </div>
                             <span className="trend-chip positive">Consistent Growth</span>
                         </div>
-                        <TrendChart values={trendData} label="Accepted quality score trajectory" />
+                        <TrendChart values={active.trend} label="Accepted quality score trajectory" />
                         <div className="chart-legend" style={{ marginTop: "16px" }}>
-                            <span><i className="legend-dot" /> Live Quality Score: <b>94.2</b></span>
+                            <span><i className="legend-dot" /> Live Quality Score: <b>{active.quality}</b></span>
                             <span>Target Minimum: <b>88.0</b></span>
-                            <span>Historical Manual Baseline: <b>78.0</b></span>
+                            <span>Historical Manual Baseline: <b>{active.baseline}</b></span>
                         </div>
                     </article>
 
@@ -247,8 +269,8 @@ export default function QualityRoiAnalytics() {
                         </div>
                         <div style={{ display: "grid", gap: "12px" }}>
                             <div style={{ padding: "10px", background: "#f8faf7", borderRadius: "8px" }}>
-                                <strong>+16.2 Points Overall Quality</strong>
-                                <p style={{ fontSize: "0.72rem", marginTop: "2px" }}>From initial 78.0 baseline to 94.2 current average score.</p>
+                                <strong>+{active.gain} Points Overall Quality</strong>
+                                <p style={{ fontSize: "0.72rem", marginTop: "2px" }}>From initial {active.baseline} baseline to {active.quality} current average score.</p>
                             </div>
                             <div style={{ padding: "10px", background: "#f8faf7", borderRadius: "8px" }}>
                                 <strong>-68% Defect Escape Rate</strong>

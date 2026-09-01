@@ -34,6 +34,12 @@
 .dashboard-shortcuts a > span { min-width: 0; font-size: 0.76rem; font-weight: 800; }
 .dashboard-shortcuts a small { display: block; margin-top: 2px; overflow: hidden; color: var(--muted); font-size: 0.64rem; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .dashboard-shortcuts a > b { color: var(--accent-dark); }
+.operations-nav__toggle { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; font: inherit; }
+.operations-nav__caret { margin-left: auto; color: #709182; font-size: 0.7rem; transition: transform 160ms ease; }
+.operations-nav__toggle.is-open .operations-nav__caret { transform: rotate(180deg); color: #b8e6d4; }
+.operations-nav__submenu { display: grid; gap: 2px; margin: 2px 0 6px; padding: 4px 0 4px 12px; border-left: 1px solid rgba(184, 230, 212, 0.22); }
+.operations-nav__sublink { display: block; padding: 8px 11px; border-radius: 8px; color: #a9c0b3; font-size: 0.74rem; font-weight: 700; transition: background 160ms ease, color 160ms ease; }
+.operations-nav__sublink:hover, .operations-nav__sublink.active { color: white; background: rgba(184, 230, 212, 0.11); }
 .compact-activity .activity-item { color: inherit; }
 
 :root {

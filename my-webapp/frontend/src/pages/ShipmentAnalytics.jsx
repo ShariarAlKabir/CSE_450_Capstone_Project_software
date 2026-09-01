@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 
 import OperationsShell from "../components/OperationsShell";
+import ScopeToggle from "../components/ScopeToggle";
 
 export default function ShipmentAnalytics() {
     const [shipments, setShipments] = useState([]);
@@ -10,6 +11,7 @@ export default function ShipmentAnalytics() {
     const [fabricFilter, setFabricFilter] = useState("All");
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedShipment, setSelectedShipment] = useState(null);
+    const [scope, setScope] = useState("All");
 
     useEffect(() => {
         Promise.all([
@@ -22,7 +24,7 @@ export default function ShipmentAnalytics() {
                     supMap[s.supplier_id] = s.name;
                 });
 
-                const parsed = (shpRes.data?.shipments || []).map((row) => {
+                const parsed = (shpRes.data?.shipments || []).map((row, idx) => {
                     const quality = row.quality_score != null ? Number(row.quality_score) : null;
                     let lifecycle;
                     if (quality == null) {
@@ -48,6 +50,7 @@ export default function ShipmentAnalytics() {
                         quality,
                         notes: row.notes || "Standard lot delivery.",
                         value: Math.round((quality || 80) * 180),
+                        scope: idx % 2 === 0 ? "Fabric" : "Label",
                     };
                 });
                 setShipments(parsed);
@@ -62,8 +65,18 @@ export default function ShipmentAnalytics() {
         return ["All", ...Array.from(set)];
     }, [shipments]);
 
+    const scopedShipments = useMemo(() => {
+        return shipments.filter((s) => scope === "All" || s.scope === scope);
+    }, [shipments, scope]);
+
+    const scopeCounts = {
+        All: shipments.length,
+        Fabric: shipments.filter((s) => s.scope === "Fabric").length,
+        Label: shipments.filter((s) => s.scope === "Label").length,
+    };
+
     const filtered = useMemo(() => {
-        return shipments.filter((s) => {
+        return scopedShipments.filter((s) => {
             const matchesStage = stageFilter === "All" || s.lifecycle === stageFilter || s.samplingStage === stageFilter;
             const matchesFabric = fabricFilter === "All" || s.fabricType === fabricFilter;
             const matchesSearch = s.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -71,22 +84,22 @@ export default function ShipmentAnalytics() {
                 s.fabricType.toLowerCase().includes(searchQuery.toLowerCase());
             return matchesStage && matchesFabric && matchesSearch;
         });
-    }, [shipments, stageFilter, fabricFilter, searchQuery]);
+    }, [scopedShipments, stageFilter, fabricFilter, searchQuery]);
 
     const stats = useMemo(() => {
-        const total = shipments.length;
-        const cleared = shipments.filter((s) => s.lifecycle === "Cleared").length;
-        const inspecting = shipments.filter((s) => s.lifecycle === "Inspecting").length;
-        const inTransit = shipments.filter((s) => s.lifecycle === "In transit").length;
-        const rejected = shipments.filter((s) => s.lifecycle === "Rejected").length;
-        const totalRolls = shipments.reduce((acc, s) => acc + s.rolls, 0);
+        const total = scopedShipments.length;
+        const cleared = scopedShipments.filter((s) => s.lifecycle === "Cleared").length;
+        const inspecting = scopedShipments.filter((s) => s.lifecycle === "Inspecting").length;
+        const inTransit = scopedShipments.filter((s) => s.lifecycle === "In transit").length;
+        const rejected = scopedShipments.filter((s) => s.lifecycle === "Rejected").length;
+        const totalRolls = scopedShipments.reduce((acc, s) => acc + s.rolls, 0);
 
-        const qualityScores = shipments.filter((s) => s.quality != null).map((s) => s.quality);
+        const qualityScores = scopedShipments.filter((s) => s.quality != null).map((s) => s.quality);
         const avgScore = qualityScores.length ? (qualityScores.reduce((a, b) => a + b, 0) / qualityScores.length).toFixed(1) : "85.0";
 
         // Fabric type counts
         const fabricCounts = {};
-        shipments.forEach((s) => {
+        scopedShipments.forEach((s) => {
             fabricCounts[s.fabricType] = (fabricCounts[s.fabricType] || 0) + 1;
         });
 
@@ -100,7 +113,7 @@ export default function ShipmentAnalytics() {
             avgScore,
             fabricCounts,
         };
-    }, [shipments]);
+    }, [scopedShipments]);
 
     return (
         <OperationsShell
@@ -146,6 +159,7 @@ export default function ShipmentAnalytics() {
                     aria-label="Search shipments"
                     style={{ flex: 1, minWidth: "220px", borderBottom: "1px solid var(--line)" }}
                 />
+                <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
                 <div className="filter-pills">
                     {["All", "Cleared", "Inspecting", "In transit", "Rejected"].map((st) => (
                         <button
@@ -194,7 +208,7 @@ export default function ShipmentAnalytics() {
                             <h3 style={{ marginTop: "4px" }}>Initial Check</h3>
                             <p style={{ fontSize: "0.75rem", marginTop: "4px" }}>Visual outer wrap & fabric tension check.</p>
                             <strong style={{ display: "block", marginTop: "8px", fontSize: "1.1rem" }}>
-                                {shipments.filter((s) => s.samplingStage === "Initial").length} Lots
+                                {scopedShipments.filter((s) => s.samplingStage === "Initial").length} Lots
                             </strong>
                         </div>
 
@@ -212,7 +226,7 @@ export default function ShipmentAnalytics() {
                             <h3 style={{ marginTop: "4px" }}>Second Sample</h3>
                             <p style={{ fontSize: "0.75rem", marginTop: "4px" }}>AI automated camera scan on first 3 rolls.</p>
                             <strong style={{ display: "block", marginTop: "8px", fontSize: "1.1rem" }}>
-                                {shipments.filter((s) => s.samplingStage === "Second").length} Lots
+                                {scopedShipments.filter((s) => s.samplingStage === "Second").length} Lots
                             </strong>
                         </div>
 
@@ -230,7 +244,7 @@ export default function ShipmentAnalytics() {
                             <h3 style={{ marginTop: "4px" }}>Final Release</h3>
                             <p style={{ fontSize: "0.75rem", marginTop: "4px" }}>Scorecard calculation and release clearance.</p>
                             <strong style={{ display: "block", marginTop: "8px", fontSize: "1.1rem" }}>
-                                {shipments.filter((s) => s.samplingStage === "Final").length} Lots
+                                {scopedShipments.filter((s) => s.samplingStage === "Final").length} Lots
                             </strong>
                         </div>
                     </div>

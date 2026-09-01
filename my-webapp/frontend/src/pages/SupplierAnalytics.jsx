@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 
 import OperationsShell from "../components/OperationsShell";
+import ScopeToggle from "../components/ScopeToggle";
 
 export default function SupplierAnalytics() {
     const [suppliers, setSuppliers] = useState([]);
@@ -10,6 +11,7 @@ export default function SupplierAnalytics() {
     const [searchQuery, setSearchQuery] = useState("");
     const [sortBy, setSortBy] = useState("rating");
     const [selectedSupplier, setSelectedSupplier] = useState(null);
+    const [scope, setScope] = useState("All");
 
     useEffect(() => {
         axios.get("http://localhost:8000/api/fabric/suppliers")
@@ -41,6 +43,7 @@ export default function SupplierAnalytics() {
                         onTime,
                         copq,
                         spend: 15 + (idx + 1) * 6,
+                        scope: idx % 2 === 0 ? "Fabric" : "Label",
                     };
                 });
                 setSuppliers(parsed);
@@ -49,8 +52,18 @@ export default function SupplierAnalytics() {
             .catch(() => setSuppliers([]));
     }, []);
 
+    const scopedSuppliers = useMemo(() => {
+        return suppliers.filter((s) => scope === "All" || s.scope === scope);
+    }, [suppliers, scope]);
+
+    const scopeCounts = {
+        All: suppliers.length,
+        Fabric: suppliers.filter((s) => s.scope === "Fabric").length,
+        Label: suppliers.filter((s) => s.scope === "Label").length,
+    };
+
     const filtered = useMemo(() => {
-        return suppliers
+        return scopedSuppliers
             .filter((s) => (tierFilter === "All" || s.tier === tierFilter) && s.name.toLowerCase().includes(searchQuery.toLowerCase()))
             .sort((a, b) => {
                 if (sortBy === "name") return a.name.localeCompare(b.name);
@@ -59,21 +72,21 @@ export default function SupplierAnalytics() {
                 if (sortBy === "ontime") return b.onTime - a.onTime;
                 return b.score - a.score;
             });
-    }, [suppliers, tierFilter, searchQuery, sortBy]);
+    }, [scopedSuppliers, tierFilter, searchQuery, sortBy]);
 
     const stats = useMemo(() => {
-        if (!suppliers.length) return { avgScore: 0, preferredCount: 0, watchlistCount: 0, totalSpend: 0 };
-        const totalScore = suppliers.reduce((acc, s) => acc + s.score, 0);
-        const preferred = suppliers.filter((s) => s.tier === "Preferred").length;
-        const watchlist = suppliers.filter((s) => s.tier === "Watchlist").length;
-        const spend = suppliers.reduce((acc, s) => acc + s.spend, 0);
+        if (!scopedSuppliers.length) return { avgScore: 0, preferredCount: 0, watchlistCount: 0, totalSpend: 0 };
+        const totalScore = scopedSuppliers.reduce((acc, s) => acc + s.score, 0);
+        const preferred = scopedSuppliers.filter((s) => s.tier === "Preferred").length;
+        const watchlist = scopedSuppliers.filter((s) => s.tier === "Watchlist").length;
+        const spend = scopedSuppliers.reduce((acc, s) => acc + s.spend, 0);
         return {
-            avgScore: (totalScore / suppliers.length).toFixed(1),
+            avgScore: (totalScore / scopedSuppliers.length).toFixed(1),
             preferredCount: preferred,
             watchlistCount: watchlist,
             totalSpend: spend,
         };
-    }, [suppliers]);
+    }, [scopedSuppliers]);
 
     return (
         <OperationsShell
@@ -90,7 +103,7 @@ export default function SupplierAnalytics() {
             <section className="kpi-grid">
                 <div className="kpi-card">
                     <span>Active Suppliers</span>
-                    <strong>{suppliers.length}</strong>
+                    <strong>{scopedSuppliers.length}</strong>
                     <small className="positive">100% database verified</small>
                 </div>
                 <div className="kpi-card">
@@ -100,7 +113,7 @@ export default function SupplierAnalytics() {
                 </div>
                 <div className="kpi-card">
                     <span>Preferred Tier Rate</span>
-                    <strong>{suppliers.length ? Math.round((stats.preferredCount / suppliers.length) * 100) : 0}%</strong>
+                    <strong>{scopedSuppliers.length ? Math.round((stats.preferredCount / scopedSuppliers.length) * 100) : 0}%</strong>
                     <small>{stats.preferredCount} top-tier mills</small>
                 </div>
                 <div className="kpi-card">
@@ -121,6 +134,7 @@ export default function SupplierAnalytics() {
                     aria-label="Search suppliers"
                     style={{ flex: 1, minWidth: "220px", borderBottom: "1px solid var(--line)" }}
                 />
+                <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
                 <div className="filter-pills">
                     {["All", "Preferred", "Standard", "Watchlist"].map((t) => (
                         <button
@@ -128,7 +142,7 @@ export default function SupplierAnalytics() {
                             className={tierFilter === t ? "is-active" : ""}
                             onClick={() => setTierFilter(t)}
                         >
-                            {t} {t !== "All" && `(${suppliers.filter((s) => s.tier === t).length})`}
+                            {t} {t !== "All" && `(${scopedSuppliers.filter((s) => s.tier === t).length})`}
                         </button>
                     ))}
                 </div>
@@ -155,7 +169,7 @@ export default function SupplierAnalytics() {
                     </div>
 
                     <div className="scatter-plot" style={{ position: "relative", height: "260px", background: "#fafbf8", borderRadius: "8px", border: "1px solid #dce4dc" }}>
-                        {suppliers.map((s) => {
+                        {scopedSuppliers.map((s) => {
                             const leftPct = Math.max(8, Math.min(90, (s.effectiveCost - 3.1) * 90));
                             const bottomPct = Math.max(10, Math.min(88, s.defectRate * 14));
                             const isSel = selectedSupplier?.id === s.id;

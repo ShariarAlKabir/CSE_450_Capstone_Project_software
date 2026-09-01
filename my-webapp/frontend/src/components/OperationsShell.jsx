@@ -11,9 +11,23 @@ const navigation = [
     { to: "/reports", label: "Reports", mark: "05" },
 ];
 
+const hiddenPages = [
+    { to: "/analytics/quality", label: "Quality trend" },
+    { to: "/analytics/roi", label: "Time returned" },
+    { to: "/analytics/defects", label: "Defects" },
+    { to: "/analytics/suppliers", label: "Supplier scorecards" },
+    { to: "/analytics/shipments", label: "Shipment lifecycle" },
+    { to: "/analytics/inspections", label: "Inspection confidence" },
+    { to: "/fabric-inspection", label: "Fabric inspection" },
+    { to: "/label-inspection", label: "Label inspection" },
+    { to: "/deterministic", label: "Deterministic review" },
+    { to: "/non-deterministic", label: "Non-deterministic review" },
+];
+
 function OperationsShell({ title, eyebrow, children, actions }) {
     const [query, setQuery] = useState("");
     const [menuOpen, setMenuOpen] = useState(false);
+    const [pagesOpen, setPagesOpen] = useState(false);
     const location = useLocation();
     const normalizedQuery = query.trim().toLowerCase();
     const searchResults = normalizedQuery
@@ -44,10 +58,34 @@ function OperationsShell({ title, eyebrow, children, actions }) {
                             <span>{item.mark}</span>{item.label}
                         </NavLink>
                     ))}
+
+                    <button
+                        type="button"
+                        className={`operations-nav__link operations-nav__toggle${pagesOpen ? " is-open" : ""}`}
+                        onClick={() => setPagesOpen((isOpen) => !isOpen)}
+                        aria-expanded={pagesOpen}
+                    >
+                        <span>06</span>Analytics <span className="operations-nav__caret" aria-hidden="true">▾</span>
+                    </button>
+
+                    {pagesOpen && (
+                        <div className="operations-nav__submenu">
+                            {hiddenPages.map((page) => (
+                                <NavLink
+                                    key={page.to}
+                                    to={page.to}
+                                    className="operations-nav__sublink"
+                                    onClick={() => { setPagesOpen(false); setMenuOpen(false); }}
+                                >
+                                    {page.label}
+                                </NavLink>
+                            ))}
+                        </div>
+                    )}
                 </nav>
 
                 <div className="operations-sidebar__footer">
-                    <NavLink to="/notifications" className="operations-nav__link"><span>06</span>Notifications <b>3</b></NavLink>
+                    <NavLink to="/notifications" className="operations-nav__link"><span>07</span>Notifications <b>3</b></NavLink>
                     <NavLink to="/account" className="operations-user"><span className="avatar">KH</span><span><strong>Shariar Al Kabir</strong><small>Quality manager</small></span></NavLink>
                 </div>
             </aside>

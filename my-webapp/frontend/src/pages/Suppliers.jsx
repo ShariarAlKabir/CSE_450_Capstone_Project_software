@@ -3,6 +3,7 @@ import axios from "axios";
 import { useSearchParams } from "react-router-dom";
 
 import OperationsShell from "../components/OperationsShell";
+import ScopeToggle from "../components/ScopeToggle";
 import { ScoreRing } from "../components/Visuals";
 
 const tierClass = (tier) => (tier || "standard").toLowerCase();
@@ -22,7 +23,7 @@ const normalizeSupplier = (row, index) => {
             .slice(0, 2)
             .join("")
             .toUpperCase(),
-        scope: "Fabric",
+        scope: index % 2 === 0 ? "Fabric" : "Label",
         tier: score >= 90 ? "Preferred" : score >= 80 ? "Standard" : "Watchlist",
         trend: score >= 90 ? "Improving" : score >= 80 ? "Stable" : "Declining",
         score: Math.round(score),
@@ -52,6 +53,7 @@ function Suppliers() {
     const [compareIds, setCompareIds] = useState([]);
     const [suppliers, setSuppliers] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [scope, setScope] = useState("All");
 
     useEffect(() => {
         axios.get("http://localhost:8000/api/fabric/suppliers")
@@ -69,10 +71,15 @@ function Suppliers() {
 
     const selectedId = searchParams.get("selected") || suppliers[0]?.id || "";
     const selected = suppliers.find((supplier) => supplier.id === selectedId) || suppliers[0];
+    const scopeCounts = {
+        All: suppliers.length,
+        Fabric: suppliers.filter((supplier) => supplier.scope === "Fabric").length,
+        Label: suppliers.filter((supplier) => supplier.scope === "Label").length,
+    };
     const filtered = useMemo(() => suppliers
-        .filter((supplier) => (tier === "All" || supplier.tier === tier) && supplier.name.toLowerCase().includes(query.toLowerCase()))
+        .filter((supplier) => (scope === "All" || supplier.scope === scope) && (tier === "All" || supplier.tier === tier) && supplier.name.toLowerCase().includes(query.toLowerCase()))
         .sort((a, b) => sortBy === "name" ? a.name.localeCompare(b.name) : b[sortBy] - a[sortBy]),
-    [query, sortBy, suppliers, tier]);
+    [query, sortBy, suppliers, tier, scope]);
     const compared = suppliers.filter((supplier) => compareIds.includes(supplier.id));
 
     const selectSupplier = (id) => setSearchParams({ selected: id });
@@ -92,6 +99,7 @@ function Suppliers() {
         <OperationsShell eyebrow="Supplier intelligence" title="Manage the quality of your source." actions={<button className="button button-primary" onClick={() => window.print()}>Export negotiation packet</button>}>
             <section className="workspace-card supplier-filterbar">
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a supplier" aria-label="Find a supplier" />
+                <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
                 <div className="filter-pills">{["All", "Preferred", "Standard", "Watchlist"].map((item) => <button className={tier === item ? "is-active" : ""} onClick={() => setTier(item)} key={item}>{item}</button>)}</div>
                 <label className="select-control">Sort by <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="score">Overall score</option><option value="quality">Quality</option><option value="cost">Cost efficiency</option><option value="delivery">On-time delivery</option><option value="name">Name</option></select></label>
             </section>
@@ -163,7 +171,7 @@ function Suppliers() {
                         <div><span className="section-label">Supplier ranking</span><h2>Price vs. quality exposure</h2></div>
                     </div>
                     <div className="scatter-plot">
-                        {suppliers.map((supplier) => (
+                        {suppliers.filter((supplier) => scope === "All" || supplier.scope === scope).map((supplier) => (
                             <button key={supplier.id} className={`scatter-point scatter-point--${tierClass(supplier.tier)}`} style={{ left: `${(supplier.effectiveCost - 3.2) * 105}%`, bottom: `${supplier.defectRate * 13}%` }} onClick={() => selectSupplier(supplier.id)} title={`${supplier.name}: $${supplier.effectiveCost} / ${supplier.defectRate}% defect rate`}>
                                 {supplier.initials}
                             </button>

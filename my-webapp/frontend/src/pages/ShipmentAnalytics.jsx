@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 
+import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
 
@@ -15,8 +16,8 @@ export default function ShipmentAnalytics() {
 
     useEffect(() => {
         Promise.all([
-            axios.get("http://localhost:8000/api/fabric/suppliers"),
-            axios.get("http://localhost:8000/api/fabric/shipments"),
+            axios.get(`${API_BASE_URL}/api/fabric/suppliers`),
+            axios.get(`${API_BASE_URL}/api/fabric/shipments`),
         ])
             .then(([supRes, shpRes]) => {
                 const supMap = {};

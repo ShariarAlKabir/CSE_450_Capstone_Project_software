@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
+import { API_BASE_URL } from "../config.js";
 import AppShell from "../components/AppShell";
 
 function Deterministic() {
@@ -70,7 +71,7 @@ function Deterministic() {
             formData.append("candidate", candidate);
 
             const response = await axios.post(
-                "http://localhost:8000/api/deterministic/inspect",
+                `${API_BASE_URL}/api/deterministic/inspect`,
                 formData,
                 {
                     headers: {
@@ -339,7 +340,7 @@ function Deterministic() {
                         <div className="section-label">Diagnostic visualization</div>
                         <div className="preview-frame preview-frame--large">
                             <img
-                                src={`http://localhost:8000${result.visualization_url}`}
+                                src={`${API_BASE_URL}${result.visualization_url}`}
                                 alt="Inspection diagnostic visualization"
                                 className="preview-image"
                             />

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 
+import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
 
@@ -14,7 +15,7 @@ export default function SupplierAnalytics() {
     const [scope, setScope] = useState("All");
 
     useEffect(() => {
-        axios.get("http://localhost:8000/api/fabric/suppliers")
+        axios.get(`${API_BASE_URL}/api/fabric/suppliers`)
             .then((res) => {
                 const list = res.data?.suppliers || [];
                 const parsed = list.map((row, idx) => {

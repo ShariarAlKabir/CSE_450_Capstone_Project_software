@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 
+import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import { TrendChart } from "../components/Visuals";
 import { activity } from "../data/operationsData";
@@ -16,15 +17,15 @@ function Home() {
     const [suppliers, setSuppliers] = useState([]);
 
     useEffect(() => {
-        axios.get("http://localhost:8000/api/fabric/dashboard/stats", { params: { scope, period } })
+        axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope, period } })
             .then((response) => setStats(response.data))
             .catch(() => setStats(null));
 
-        axios.get("http://localhost:8000/api/fabric/inspections")
+        axios.get(`${API_BASE_URL}/api/fabric/inspections`)
             .then((response) => setInspections(response.data?.inspections || []))
             .catch(() => setInspections([]));
 
-        axios.get("http://localhost:8000/api/fabric/suppliers")
+        axios.get(`${API_BASE_URL}/api/fabric/suppliers`)
             .then((response) => {
                 const rows = response.data?.suppliers || [];
                 setSuppliers(rows.map((row) => {

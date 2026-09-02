@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
+import axios from "axios";
 
+import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
 import { TrendChart } from "../components/Visuals";
@@ -14,12 +16,14 @@ const SCOPE_CONFIG = {
 
 export default function QualityRoiAnalytics() {
     const location = useLocation();
+    const [searchParams] = useSearchParams();
     const [activeTab, setActiveTab] = useState("roi"); // "roi" | "trends" | "copq"
     const [scope, setScope] = useState("All");
     const [rollsPerMonth, setRollsPerMonth] = useState(180);
     const [manualMinutesPerRoll, setManualMinutesPerRoll] = useState(18);
     const [hourlyLaborCost, setHourlyLaborCost] = useState(25);
     const [rejectionCostPerRoll, setRejectionCostPerRoll] = useState(320);
+    useEffect(() => { const requestedScope = searchParams.get("scope") || "All"; setScope(requestedScope); axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope: requestedScope, period: searchParams.get("period") || "This month" } }).then(({data}) => { setRollsPerMonth(Number(data.total_inspections || 0)); setManualMinutesPerRoll(Number(data.manual_minutes_per_item || 18)); }).catch(() => {}); }, [searchParams]);
     const active = SCOPE_CONFIG[scope];
 
     const changeScope = (next) => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 
+import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
 
@@ -13,7 +14,7 @@ function Inspections() {
     const [scope, setScope] = useState("All");
 
     useEffect(() => {
-        axios.get("http://localhost:8000/api/fabric/inspections")
+        axios.get(`${API_BASE_URL}/api/fabric/inspections`)
             .then((response) => setInspections(response.data?.inspections || []))
             .catch(() => setInspections([]));
     }, []);

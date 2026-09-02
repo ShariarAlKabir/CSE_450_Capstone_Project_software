@@ -645,7 +645,7 @@ def get_dashboard_stats(scope: str = Query("All"), period: str = Query("This mon
                 avg_quality = round(((avg_quality * int(total_inspections)) + (label_quality * label_inspections)) / combined, 1) if combined else 0
                 total_inspections = combined
 
-            cur.execute("SELECT ROUND(AVG(CASE WHEN grade = 'A' THEN 95 WHEN grade = 'B' THEN 88 WHEN grade = 'C' THEN 78 ELSE 65 END)::numeric, 1) AS score FROM inspections GROUP BY date_trunc('month', inspected_at) ORDER BY date_trunc('month', inspected_at)")
+            cur.execute("SELECT ROUND(AVG(points_per_100_yards)::numeric, 1) AS score FROM inspections GROUP BY date_trunc('month', inspected_at) ORDER BY date_trunc('month', inspected_at)")
             trend_rows = cur.fetchall()
             trend = [float(row["score"] or 0) for row in trend_rows] or [avg_quality]
 
@@ -816,7 +816,7 @@ def inspection_detail(inspection_id: int):
     conn = get_db()
     try:
         with conn.cursor() as cur:
-            cur.execute("""SELECT i.inspection_id, i.total_images_processed, i.total_defects_found, i.total_penalty_points, i.points_per_100_yards, i.grade, i.model_version, i.status, i.inspected_at, fr.roll_code, fr.roll_length_yards, sh.shipment_code, s.name AS supplier FROM inspections i JOIN fabric_rolls fr ON fr.roll_id=i.roll_id JOIN shipments sh ON sh.shipment_id=fr.shipment_id JOIN suppliers s ON s.supplier_id=sh.supplier_id WHERE i.inspection_id=%s""", (inspection_id,))
+            cur.execute("""SELECT i.inspection_id, i.total_images_processed, i.total_defects_found, i.total_penalty_points, i.points_per_100_yards, (100 - i.points_per_100_yards) AS quality_score, i.grade, i.model_version, i.status, i.inspected_at, fr.roll_code, fr.roll_length_yards, sh.shipment_code, s.name AS supplier FROM inspections i JOIN fabric_rolls fr ON fr.roll_id=i.roll_id JOIN shipments sh ON sh.shipment_id=fr.shipment_id JOIN suppliers s ON s.supplier_id=sh.supplier_id WHERE i.inspection_id=%s""", (inspection_id,))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail='Inspection not found')
@@ -829,7 +829,10 @@ def inspection_detail(inspection_id: int):
             result = _normalize_row(dict(row))
             result["total_defects_found"] = len(defects)
             result["total_penalty_points"] = penalty
-            result["points_per_100_yards"] = round((penalty * 100) / length, 2) if length else 0
+            stored_score = float(row.get("points_per_100_yards") or 0)
+            result["points_per_100_yards"] = round(stored_score, 2)
+            result["quality_score"] = round(stored_score, 2)
+            result["status"] = "Approved" if stored_score >= 80 else "Rejected"
             result["defects"] = defects
             result["defect_summary"] = summary
             return result

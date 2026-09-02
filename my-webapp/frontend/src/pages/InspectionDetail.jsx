@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
 
+import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 
 const SEVERITY_LABELS = { 1: "Minor", 2: "Moderate", 3: "Serious", 4: "Critical" };
@@ -14,7 +15,7 @@ export default function InspectionDetail() {
     const [hoveredDefect, setHoveredDefect] = useState(null);
 
     useEffect(() => {
-        axios.get(`http://localhost:8000/api/fabric/inspections/${inspectionId}`)
+        axios.get(`${API_BASE_URL}/api/fabric/inspections/${inspectionId}`)
             .then((response) => setData(response.data))
             .catch(() => setData(null));
     }, [inspectionId]);

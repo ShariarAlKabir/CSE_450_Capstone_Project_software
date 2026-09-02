@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
+import { API_BASE_URL } from "../config.js";
 import AppShell from "../components/AppShell";
 
 function FabricInspection() {
@@ -57,7 +58,7 @@ function FabricInspection() {
             formData.append("roll_code", "R-01");
 
             const response = await axios.post(
-                "http://localhost:8000/api/fabric/inspect",
+                `${API_BASE_URL}/api/fabric/inspect`,
                 formData,
                 {
                     headers: {

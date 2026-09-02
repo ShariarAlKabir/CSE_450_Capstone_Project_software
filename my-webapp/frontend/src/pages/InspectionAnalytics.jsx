@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 
+import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
 
@@ -26,8 +27,8 @@ export default function InspectionAnalytics() {
 
     useEffect(() => {
         Promise.all([
-            axios.get("http://localhost:8000/api/fabric/inspections"),
-            axios.get("http://localhost:8000/api/fabric/dashboard/stats"),
+            axios.get(`${API_BASE_URL}/api/fabric/inspections`),
+            axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`),
         ])
             .then(([inspRes, statRes]) => {
                 setInspections(inspRes.data?.inspections || []);

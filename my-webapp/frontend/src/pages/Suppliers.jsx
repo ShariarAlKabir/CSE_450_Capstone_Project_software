@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { useSearchParams } from "react-router-dom";
 
+import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
 import Modal from "../components/Modal";
@@ -89,7 +90,7 @@ function Suppliers() {
         setSaving(true);
         setFormError("");
         try {
-            await axios.post("http://localhost:8000/api/fabric/suppliers", {
+            await axios.post(`${API_BASE_URL}/api/fabric/suppliers`, {
                 ...form,
                 supplier_rating: Number(form.supplier_rating) || 85,
             });
@@ -102,7 +103,7 @@ function Suppliers() {
     };
 
     useEffect(() => {
-        axios.get("http://localhost:8000/api/fabric/suppliers")
+        axios.get(`${API_BASE_URL}/api/fabric/suppliers`)
             .then((response) => {
                 const rows = response.data?.suppliers || [];
                 const normalized = rows.map(normalizeSupplier);

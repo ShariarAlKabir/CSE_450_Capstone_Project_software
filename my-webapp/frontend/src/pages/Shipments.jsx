@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { useSearchParams } from "react-router-dom";
 
+import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
 import Modal from "../components/Modal";
@@ -74,7 +75,7 @@ function Shipments() {
         setSaving(true);
         setFormError("");
         try {
-            await axios.post("http://localhost:8000/api/fabric/shipments", {
+            await axios.post(`${API_BASE_URL}/api/fabric/shipments`, {
                 ...form,
                 supplier_id: Number(form.supplier_id),
                 total_rolls: Number(form.total_rolls) || 1,
@@ -90,8 +91,8 @@ function Shipments() {
 
     useEffect(() => {
         Promise.all([
-            axios.get("http://localhost:8000/api/fabric/suppliers"),
-            axios.get("http://localhost:8000/api/fabric/shipments"),
+            axios.get(`${API_BASE_URL}/api/fabric/suppliers`),
+            axios.get(`${API_BASE_URL}/api/fabric/shipments`),
         ])
             .then(([supplierResponse, shipmentResponse]) => {
                 const supplierMap = {};

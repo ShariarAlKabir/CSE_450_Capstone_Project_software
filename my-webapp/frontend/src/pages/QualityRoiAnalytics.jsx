@@ -9,25 +9,47 @@ import { TrendChart } from "../components/Visuals";
 import { trendData } from "../data/operationsData";
 
 const SCOPE_CONFIG = {
-    All: { quality: 94.2, manual: 18, baseline: 78.0, gain: 16.2, trend: trendData },
-    Fabric: { quality: 94.2, manual: 18, baseline: 78.0, gain: 16.2, trend: trendData },
-    Label: { quality: 96.5, manual: 12, baseline: 82.0, gain: 14.5, trend: [80, 83, 84, 86, 87, 89, 90, 92, 93, 94, 95, 96] },
+    All: { quality: 94.2, manual: 18, baseline: 78.0, trend: trendData },
+    Fabric: { quality: 94.2, manual: 18, baseline: 78.0, trend: trendData },
+    Label: { quality: 96.5, manual: 12, baseline: 82.0, trend: [80, 83, 84, 86, 87, 89, 90, 92, 93, 94, 95, 96] },
 };
 
 export default function QualityRoiAnalytics() {
     const location = useLocation();
-    const [searchParams] = useSearchParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [activeTab, setActiveTab] = useState("roi"); // "roi" | "trends" | "copq"
-    const [scope, setScope] = useState("All");
+    const scope = searchParams.get("scope") || "All";
     const [rollsPerMonth, setRollsPerMonth] = useState(180);
     const [manualMinutesPerRoll, setManualMinutesPerRoll] = useState(18);
     const [hourlyLaborCost, setHourlyLaborCost] = useState(25);
     const [rejectionCostPerRoll, setRejectionCostPerRoll] = useState(320);
-    useEffect(() => { const requestedScope = searchParams.get("scope") || "All"; setScope(requestedScope); axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope: requestedScope, period: searchParams.get("period") || "This month" } }).then(({data}) => { setRollsPerMonth(Number(data.total_inspections || 0)); setManualMinutesPerRoll(Number(data.manual_minutes_per_item || 18)); }).catch(() => {}); }, [searchParams]);
-    const active = SCOPE_CONFIG[scope];
+    const [liveQuality, setLiveQuality] = useState(null);
+    const [liveTrend, setLiveTrend] = useState(null);
+
+    useEffect(() => {
+        axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope, period: searchParams.get("period") || "This month" } })
+            .then(({ data }) => {
+                setRollsPerMonth(Number(data.total_inspections || 0));
+                setManualMinutesPerRoll(Number(data.manual_minutes_per_item || 18));
+                setLiveQuality(data.avg_quality != null ? Number(data.avg_quality) : null);
+                setLiveTrend(Array.isArray(data.trend) && data.trend.length ? data.trend.map(Number) : null);
+            })
+            .catch(() => {});
+    }, [scope, searchParams]);
+
+    // Same quality metric as the dashboard: current = latest month, trend = monthly series.
+    const config = SCOPE_CONFIG[scope];
+    const quality = liveQuality ?? config.quality;
+    const trend = liveTrend && liveTrend.length ? liveTrend : config.trend;
+    const baseline = trend[0] ?? config.baseline;
+    const gain = Math.max(0, quality - baseline);
 
     const changeScope = (next) => {
-        setScope(next);
+        setSearchParams((prev) => {
+            const params = new URLSearchParams(prev);
+            params.set("scope", next);
+            return params;
+        });
         setManualMinutesPerRoll(SCOPE_CONFIG[next].manual);
     };
 
@@ -82,8 +104,8 @@ export default function QualityRoiAnalytics() {
                 </div>
                 <div className="kpi-card">
                     <span>Accepted Quality Score</span>
-                    <strong>{active.quality}<small style={{ fontSize: "1rem" }}>/100</small></strong>
-                    <small className="positive">+{(active.quality - active.baseline).toFixed(1)} pts above manual baseline</small>
+                    <strong>{quality}<small style={{ fontSize: "1rem" }}>/100</small></strong>
+                    <small className="positive">+{gain.toFixed(1)} pts above manual baseline</small>
                 </div>
             </section>
 
@@ -252,15 +274,15 @@ export default function QualityRoiAnalytics() {
                         <div className="card-heading">
                             <div>
                                 <span className="section-label">Quality Score Horizon</span>
-                                <h2>12-Month Accepted Quality Performance</h2>
+                                <h2>Monthly Accepted Quality Performance</h2>
                             </div>
-                            <span className="trend-chip positive">Consistent Growth</span>
+                            <span className="trend-chip positive">{gain >= 1 ? "Consistent Growth" : "Stable Quality"}</span>
                         </div>
-                        <TrendChart values={active.trend} label="Accepted quality score trajectory" />
+                        <TrendChart values={trend} label="Accepted quality score trajectory" />
                         <div className="chart-legend" style={{ marginTop: "16px" }}>
-                            <span><i className="legend-dot" /> Live Quality Score: <b>{active.quality}</b></span>
-                            <span>Target Minimum: <b>88.0</b></span>
-                            <span>Historical Manual Baseline: <b>{active.baseline}</b></span>
+                            <span><i className="legend-dot" /> Live Quality Score: <b>{quality}</b></span>
+                            <span>Target Minimum: <b>92.0</b></span>
+                            <span>Historical Manual Baseline: <b>{baseline}</b></span>
                         </div>
                     </article>
 
@@ -273,8 +295,8 @@ export default function QualityRoiAnalytics() {
                         </div>
                         <div style={{ display: "grid", gap: "12px" }}>
                             <div style={{ padding: "10px", background: "#f8faf7", borderRadius: "8px" }}>
-                                <strong>+{active.gain} Points Overall Quality</strong>
-                                <p style={{ fontSize: "0.72rem", marginTop: "2px" }}>From initial {active.baseline} baseline to {active.quality} current average score.</p>
+                                <strong>+{gain.toFixed(1)} Points Overall Quality</strong>
+                                <p style={{ fontSize: "0.72rem", marginTop: "2px" }}>From initial {baseline} baseline to {quality} current average score.</p>
                             </div>
                             <div style={{ padding: "10px", background: "#f8faf7", borderRadius: "8px" }}>
                                 <strong>-68% Defect Escape Rate</strong>

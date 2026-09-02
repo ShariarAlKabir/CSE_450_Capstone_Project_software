@@ -623,9 +623,29 @@ def get_dashboard_stats(scope: str = Query("All"), period: str = Query("This mon
             defect_rows = cur.fetchall()
             defect_breakdown = [{"label": row["defect_type"], "value": int(row["count"])} for row in defect_rows]
 
-            # Average quality score from recent shipments for trend
-            cur.execute("SELECT ROUND(AVG(quality_score)::numeric, 1) AS avg_score FROM shipments WHERE quality_score IS NOT NULL", (interval,))
-            avg_quality = float(cur.fetchone()["avg_score"] or 0)
+            # Fabric quality trend: monthly average roll quality score (points/100 yards)
+            cur.execute(
+                """
+                SELECT ROUND(AVG(points_per_100_yards)::numeric, 1) AS score
+                FROM inspections
+                WHERE points_per_100_yards IS NOT NULL
+                GROUP BY date_trunc('month', inspected_at)
+                ORDER BY date_trunc('month', inspected_at)
+                """
+            )
+            fabric_trend = [float(row["score"] or 0) for row in cur.fetchall()]
+
+            # Label quality trend: monthly average SSIM score
+            cur.execute(
+                """
+                SELECT ROUND(AVG(ssim_score * 100)::numeric, 1) AS score
+                FROM label_inspections
+                WHERE ssim_score IS NOT NULL
+                GROUP BY date_trunc('month', inspected_at)
+                ORDER BY date_trunc('month', inspected_at)
+                """
+            )
+            label_trend = [float(row["score"] or 0) for row in cur.fetchall()]
 
             cur.execute("SELECT COUNT(*) AS total, ROUND(AVG(ssim_score * 100)::numeric, 1) AS avg_score FROM label_inspections", (interval,))
             label_stats = cur.fetchone()
@@ -637,17 +657,17 @@ def get_dashboard_stats(scope: str = Query("All"), period: str = Query("This mon
                 total_shipments = 0
                 total_inspections = label_inspections
                 total_rolls = 0
-                avg_quality = label_quality
                 grade_dist = {"A": 0, "B": 0, "C": 0, "Reject": 0}
                 defect_breakdown = []
+                trend = label_trend or [label_quality]
+                avg_quality = trend[-1]
             elif scope == "All":
-                combined = int(total_inspections) + label_inspections
-                avg_quality = round(((avg_quality * int(total_inspections)) + (label_quality * label_inspections)) / combined, 1) if combined else 0
-                total_inspections = combined
-
-            cur.execute("SELECT ROUND(AVG(points_per_100_yards)::numeric, 1) AS score FROM inspections GROUP BY date_trunc('month', inspected_at) ORDER BY date_trunc('month', inspected_at)")
-            trend_rows = cur.fetchall()
-            trend = [float(row["score"] or 0) for row in trend_rows] or [avg_quality]
+                total_inspections = int(total_inspections) + label_inspections
+                trend = fabric_trend or [0]
+                avg_quality = trend[-1]
+            else:  # Fabric
+                trend = fabric_trend or [0]
+                avg_quality = trend[-1]
 
             return {
                 "total_suppliers": int(total_suppliers),

@@ -3,6 +3,7 @@ import axios from "axios";
 
 import { API_BASE_URL } from "../config.js";
 import AppShell from "../components/AppShell";
+import CameraCapture from "../components/CameraCapture";
 
 function FabricInspection() {
     const [file, setFile] = useState(null);
@@ -10,6 +11,23 @@ function FabricInspection() {
     const [result, setResult] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    const [shipments, setShipments] = useState([]);
+    const [shipmentId, setShipmentId] = useState("");
+    const [rollLength, setRollLength] = useState("");
+
+    // The roll has to be picked, not assumed: points per 100 yards is a rate,
+    // so grading without a real length (and a real shipment to file it under)
+    // would produce a grade that means nothing. This page used to post
+    // supplier_id=1, shipment_id=1, roll_code="R-01" for every upload.
+    useEffect(() => {
+        axios.get(`${API_BASE_URL}/api/fabric/shipments`)
+            .then((response) => {
+                const rows = response.data?.shipments || [];
+                setShipments(rows);
+                if (rows.length) setShipmentId(String(rows[0].shipment_id));
+            })
+            .catch(() => setShipments([]));
+    }, []);
 
     useEffect(() => {
         return () => {
@@ -19,13 +37,10 @@ function FabricInspection() {
         };
     }, [imagePreview]);
 
-    const handleFileChange = (event) => {
-        const selectedFile = event.target.files?.[0];
-
+    const applyFile = (selectedFile) => {
         if (!selectedFile) {
             return;
         }
-
         if (imagePreview) {
             URL.revokeObjectURL(imagePreview);
         }
@@ -36,6 +51,8 @@ function FabricInspection() {
         setError("");
     };
 
+    const handleFileChange = (event) => applyFile(event.target.files?.[0]);
+
     const handleInspect = async () => {
         if (!file || loading) {
             if (!file) {
@@ -44,18 +61,28 @@ function FabricInspection() {
 
             return;
         }
+        if (!shipmentId) {
+            setError("Select the shipment this roll belongs to.");
+            return;
+        }
+        if (!Number(rollLength) || Number(rollLength) <= 0) {
+            setError("Enter the roll length in yards so the four-point score can be calculated.");
+            return;
+        }
 
         setLoading(true);
         setError("");
         setResult(null);
 
         try {
+            const shipment = shipments.find((row) => String(row.shipment_id) === String(shipmentId));
             const formData = new FormData();
 
             formData.append("file", file);
-            formData.append("supplier_id", "1");
-            formData.append("shipment_id", "1");
-            formData.append("roll_code", "R-01");
+            formData.append("supplier_id", String(shipment?.supplier_id ?? ""));
+            formData.append("shipment_id", String(shipmentId));
+            formData.append("roll_code", `${shipment?.shipment_code || "ROLL"}-ADHOC`);
+            formData.append("roll_length_yards", String(rollLength));
 
             const response = await axios.post(
                 `${API_BASE_URL}/api/fabric/inspect`,
@@ -123,6 +150,13 @@ function FabricInspection() {
                         />
                     </label>
 
+                    <CameraCapture
+                        onCapture={applyFile}
+                        disabled={loading}
+                        label="Capture fabric photo"
+                        hint="Use a connected or Raspberry Pi camera to shoot the roll directly."
+                    />
+
                     {file && (
                         <div className="file-meta">
                             <span className="status-pill status-pill--neutral">
@@ -131,6 +165,41 @@ function FabricInspection() {
                             <span>{file.name}</span>
                         </div>
                     )}
+
+                    <div style={{ display: "grid", gap: "12px", marginTop: "16px" }}>
+                        <label className="select-control">
+                            Shipment
+                            <select
+                                value={shipmentId}
+                                onChange={(event) => setShipmentId(event.target.value)}
+                                disabled={loading || !shipments.length}
+                            >
+                                {!shipments.length && <option value="">No shipments on record</option>}
+                                {shipments.map((row) => (
+                                    <option key={row.shipment_id} value={row.shipment_id}>
+                                        {row.shipment_code} · {row.supplier} · {row.fabric_type}
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+
+                        <label className="select-control">
+                            Roll length (yards)
+                            <input
+                                type="number"
+                                min="1"
+                                step="0.01"
+                                value={rollLength}
+                                onChange={(event) => setRollLength(event.target.value)}
+                                placeholder="e.g. 92.5"
+                                disabled={loading}
+                            />
+                        </label>
+                        <small style={{ color: "var(--muted)", fontSize: "0.68rem" }}>
+                            The four-point score is penalty points per 100 yards, so the grade
+                            depends on the real length of the roll being inspected.
+                        </small>
+                    </div>
 
                     <button
                         className="button button-primary"
@@ -204,6 +273,13 @@ function FabricInspection() {
                                     Points / 100 yards
                                 </span>
                                 <strong>{result.points_per_100_yards}</strong>
+                            </div>
+
+                            <div className="metric-card">
+                                <span className="metric-card__label">
+                                    Quality score
+                                </span>
+                                <strong>{result.quality_score}<small>/100</small></strong>
                             </div>
 
                             <div className="metric-card">

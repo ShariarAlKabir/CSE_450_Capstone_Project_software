@@ -14,11 +14,17 @@ export default function InspectionDetail() {
     const [expanded, setExpanded] = useState(null);
     const [hoveredDefect, setHoveredDefect] = useState(null);
 
+    const isLabel = String(inspectionId).startsWith("LB-");
+    const numericId = isLabel ? String(inspectionId).slice(3) : inspectionId;
+
     useEffect(() => {
-        axios.get(`${API_BASE_URL}/api/fabric/inspections/${inspectionId}`)
+        const endpoint = isLabel
+            ? `${API_BASE_URL}/api/label/inspections/${numericId}`
+            : `${API_BASE_URL}/api/fabric/inspections/${numericId}`;
+        axios.get(endpoint)
             .then((response) => setData(response.data))
             .catch(() => setData(null));
-    }, [inspectionId]);
+    }, [inspectionId, isLabel, numericId]);
 
     const defectSummary = useMemo(() => {
         const counts = {};
@@ -45,7 +51,7 @@ export default function InspectionDetail() {
     }
 
     return (
-        <OperationsShell eyebrow="Inspection evidence" title={`Inspection IN-${inspectionId}`} actions={<Link className="button button-quiet" to="/inspections">Back to queue</Link>}>
+        <OperationsShell eyebrow="Inspection evidence" title={`Inspection ${data?.id || inspectionId}`} actions={<Link className="button button-quiet" to="/inspections">Back to queue</Link>}>
             <section className="workspace-card">
                 <div className="card-heading">
                     <div>
@@ -57,16 +63,26 @@ export default function InspectionDetail() {
                 </div>
                 <div className="shipment-detail__facts">
                     <div><span>Status</span><b>{data.status}</b></div>
-                    <div><span>Images processed</span><b>{data.total_images_processed}</b></div>
                     <div><span>Defects found</span><b>{data.total_defects_found}</b></div>
-                    <div><span>Penalty points</span><b>{data.total_penalty_points}</b></div>
-                    <div><span>Points / 100 yards</span><b>{data.points_per_100_yards}</b></div>
+                    {isLabel ? (
+                        <>
+                            <div><span>Verdict</span><b>{data.verdict}</b></div>
+                            <div><span>SSIM score</span><b>{Number(data.ssim_score || 0).toFixed(4)}</b></div>
+                            <div><span>Hotspots</span><b>{data.hotspot_count}</b></div>
+                        </>
+                    ) : (
+                        <>
+                            <div><span>Images processed</span><b>{data.total_images_processed}</b></div>
+                            <div><span>Penalty points</span><b>{data.total_penalty_points}</b></div>
+                            <div><span>Points / 100 yards</span><b>{data.points_per_100_yards}</b></div>
+                        </>
+                    )}
                 </div>
             </section>
 
             <section className="workspace-card">
                 <div className="card-heading">
-                    <div><span className="section-label">Defect breakdown</span><h2>What was found on this roll.</h2></div>
+                    <div><span className="section-label">Defect breakdown</span><h2>What was found on this {isLabel ? "sample" : "roll"}.</h2></div>
                 </div>
                 <div className="severity-chart" role="img" aria-label="Defects by severity">
                     {severityCounts.map(({ severity, count }) => (
@@ -100,7 +116,7 @@ export default function InspectionDetail() {
                             onMouseLeave={() => setHoveredDefect(null)}
                         />
                     ))}
-                    <span className="inspection-defect-map__axis">position across roll →</span>
+                    <span className="inspection-defect-map__axis">position across {isLabel ? "sample" : "roll"} →</span>
                 </div>
                 {hoveredDefect != null && (
                     <div className="inspection-defect-map__tooltip">

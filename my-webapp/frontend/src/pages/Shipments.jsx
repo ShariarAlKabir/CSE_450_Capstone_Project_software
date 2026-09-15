@@ -12,27 +12,20 @@ const stageNotes = {
     "In transit": "Shipment has been dispatched and is on its way to the facility.",
     "Received": "Rolls have arrived at the facility and are awaiting sampling.",
     "Inspecting": "Rolls are being inspected; quality score is not final yet.",
-    "Cleared / Rejected": "Final sampling is complete. A score of 80+ clears the lot, below 80 rejects it.",
+    "Cleared / Rejected": "Final sampling is complete. The lot clears or is rejected against the stored clearance score.",
 };
 
-const normalizeShipment = (row, supplierMap, index) => {
+const normalizeShipment = (row, supplierMap) => {
     const qualityScore = row.quality_score == null ? null : Number(row.quality_score);
-    let stage;
-
-    if (qualityScore == null) {
-        stage = "In transit";
-    } else if (row.sampling_stage === "Final" && qualityScore >= 80) {
-        stage = "Cleared";
-    } else if (row.sampling_stage === "Final" && qualityScore < 80) {
-        stage = "Rejected";
-    } else {
-        stage = "Inspecting";
-    }
+    // Lifecycle is computed by the API from cost_parameters.clearance_score,
+    // so the clearance rule exists in one place. It used to be copy-pasted as
+    // "quality >= 80" in three separate components.
+    const stage = row.lifecycle;
 
     return {
         id: row.shipment_code || `SH-${row.shipment_id}`,
-        supplier: supplierMap[row.supplier_id] || "Unknown supplier",
-        fabric: row.fabric_type || row.color || "Fabric",
+        supplier: row.supplier || supplierMap[row.supplier_id] || "Unknown supplier",
+        fabric: row.fabric_type || row.color || "—",
         rolls: Number(row.total_rolls || 0),
         received: row.received_date || "Pending",
         stage,
@@ -41,8 +34,41 @@ const normalizeShipment = (row, supplierMap, index) => {
         progress: row.total_rolls ? Math.round((Number(row.inspected_rolls || 0) / Number(row.total_rolls)) * 100) : 0,
         inspectedRolls: Number(row.inspected_rolls || 0),
         uninspectedRolls: Number(row.uninspected_rolls || 0),
-        value: `$${Math.max(0, Number(row.quality_score || 0) * 180).toLocaleString()}`,
-        scope: index % 2 === 0 ? "Fabric" : "Label",
+        // Lot value = inspected yardage x the supplier's contract unit price,
+        // both from the database. It used to be quality_score * 180.
+        value: row.lot_value != null ? `$${Math.round(Number(row.lot_value)).toLocaleString()}` : "—",
+        totalYards: Number(row.total_yards || 0),
+        unitPrice: row.unit_price != null ? Number(row.unit_price) : null,
+        promised: row.promised_date || null,
+        onTime: row.on_time,
+        scope: "Fabric",
+    };
+};
+
+const normalizeLabelShipment = (row) => {
+    const qualityScore = row.quality_score == null ? null : Number(row.quality_score);
+    const totalSamples = Number(row.total_samples || 0);
+    const inspectedSamples = Number(row.inspected_samples || 0);
+    const stage = row.lifecycle;
+
+    return {
+        id: row.shipment_code || `LSH-${row.shipment_id}`,
+        supplier: row.supplier || "Unknown supplier",
+        fabric: row.label_type || row.material || "—",
+        rolls: totalSamples,
+        received: row.received_date || "Pending",
+        stage,
+        quality: qualityScore,
+        sampling: row.sampling_stage || "Initial",
+        progress: totalSamples ? Math.round((inspectedSamples / totalSamples) * 100) : 0,
+        inspectedRolls: inspectedSamples,
+        uninspectedRolls: Math.max(totalSamples - inspectedSamples, 0),
+        value: row.lot_value != null ? `$${Math.round(Number(row.lot_value)).toLocaleString()}` : "—",
+        totalLabels: Number(row.total_labels || 0),
+        unitPrice: row.unit_price != null ? Number(row.unit_price) : null,
+        promised: row.promised_date || null,
+        onTime: row.on_time,
+        scope: "Label",
     };
 };
 
@@ -51,7 +77,7 @@ function Shipments() {
     const [filter, setFilter] = useState("All");
     const [shipments, setShipments] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [scope, setScope] = useState("All");
+    const [scope, setScope] = useState("Fabric");
     const [supplierOptions, setSupplierOptions] = useState([]);
     const [showAddShipment, setShowAddShipment] = useState(false);
     const [openStage, setOpenStage] = useState("");
@@ -93,17 +119,20 @@ function Shipments() {
         Promise.all([
             axios.get(`${API_BASE_URL}/api/fabric/suppliers`),
             axios.get(`${API_BASE_URL}/api/fabric/shipments`),
+            axios.get(`${API_BASE_URL}/api/label/shipments`),
         ])
-            .then(([supplierResponse, shipmentResponse]) => {
+            .then(([supplierResponse, shipmentResponse, labelResponse]) => {
+                const supplierRows = supplierResponse.data?.suppliers || [];
                 const supplierMap = {};
-                (supplierResponse.data?.suppliers || []).forEach((supplier) => {
+                supplierRows.forEach((supplier) => {
                     supplierMap[supplier.supplier_id] = supplier.name;
                 });
-                setSupplierOptions(supplierResponse.data?.suppliers || []);
-                setForm((current) => ({ ...current, supplier_id: current.supplier_id || (supplierResponse.data?.suppliers?.[0]?.supplier_id || "") }));
+                setSupplierOptions(supplierRows);
+                setForm((current) => ({ ...current, supplier_id: current.supplier_id || (supplierRows[0]?.supplier_id || "") }));
 
-                const normalized = (shipmentResponse.data?.shipments || []).map((shipment, index) => normalizeShipment(shipment, supplierMap, index));
-                setShipments(normalized);
+                const fabricShipments = (shipmentResponse.data?.shipments || []).map((shipment) => normalizeShipment(shipment, supplierMap));
+                const labelShipments = (labelResponse.data?.shipments || []).map(normalizeLabelShipment);
+                setShipments([...fabricShipments, ...labelShipments]);
             })
             .catch(() => setShipments([]))
             .finally(() => setLoading(false));

@@ -1,4 +1,4 @@
-const SCOPES = ["All", "Fabric", "Label"];
+const SCOPES = ["Fabric", "Label", "All"];
 
 function ScopeToggle({ value, onChange, counts }) {
     return (

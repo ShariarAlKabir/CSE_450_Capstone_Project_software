@@ -12,39 +12,63 @@ export default function SupplierAnalytics() {
     const [searchQuery, setSearchQuery] = useState("");
     const [sortBy, setSortBy] = useState("rating");
     const [selectedSupplier, setSelectedSupplier] = useState(null);
-    const [scope, setScope] = useState("All");
+    const [scope, setScope] = useState("Fabric");
+    const [target, setTarget] = useState(null);
+
+    // Quality target is stored in cost_parameters, not written into the page.
+    useEffect(() => {
+        axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope } })
+            .then((response) => setTarget(response.data?.quality_target ?? null))
+            .catch(() => setTarget(null));
+    }, [scope]);
 
     useEffect(() => {
-        axios.get(`${API_BASE_URL}/api/fabric/suppliers`)
-            .then((res) => {
-                const list = res.data?.suppliers || [];
-                const parsed = list.map((row, idx) => {
-                    const score = Math.round(Number(row.supplier_rating || 85));
-                    const tier = score >= 90 ? "Preferred" : score >= 80 ? "Standard" : "Watchlist";
-                    const defectRate = Number(((100 - score) / 18).toFixed(1));
-                    const effectiveCost = Number((3.2 + ((100 - score) / 40)).toFixed(2));
-                    const onTime = Math.max(60, Math.min(100, Math.round(score + 2)));
-                    const copq = Math.round((100 - score) * 160 + 1200);
+        Promise.all([
+            axios.get(`${API_BASE_URL}/api/fabric/suppliers`),
+            axios.get(`${API_BASE_URL}/api/label/suppliers`),
+        ])
+            .then(([fabricRes, labelRes]) => {
+                const list = [
+                    ...(fabricRes.data?.suppliers || []).map((row) => ({ ...row, scope: "Fabric" })),
+                    ...(labelRes.data?.suppliers || []).map((row) => ({ ...row, scope: "Label" })),
+                ];
+                // Everything below is a column the API measured or a contract
+                // amount it read. The previous version derived defect rate,
+                // effective cost, on-time delivery, COPQ and spend from the
+                // supplier rating with invented formulas - including a spend
+                // figure based on the row's position in the array.
+                const parsed = list.map((row) => {
+                    const isLabel = row.scope === "Label";
+                    const score = row.avg_quality != null
+                        ? Math.round(Number(row.avg_quality))
+                        : Math.round(Number(row.supplier_rating || 0));
 
                     return {
-                        id: `sup-${String(row.supplier_id).padStart(2, "0")}`,
+                        id: `${isLabel ? "lbl" : "sup"}-${String(row.supplier_id).padStart(2, "0")}`,
                         dbId: row.supplier_id,
                         name: row.name,
                         initials: row.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase(),
-                        country: row.country || "Bangladesh",
-                        city: row.city || "Dhaka",
-                        contact: row.contact_person || "Operations Lead",
-                        email: row.contact_email || "contact@textile.com",
-                        phone: row.contact_phone || "+8801700000000",
+                        country: row.country || "—",
+                        city: row.city || "—",
+                        contact: row.contact_person || "—",
+                        email: row.contact_email || "",
+                        phone: row.contact_phone || "",
                         score,
-                        tier,
-                        trend: score >= 90 ? "Improving" : score >= 80 ? "Stable" : "Declining",
-                        defectRate,
-                        effectiveCost,
-                        onTime,
-                        copq,
-                        spend: 15 + (idx + 1) * 6,
-                        scope: idx % 2 === 0 ? "Fabric" : "Label",
+                        rating: Number(row.supplier_rating || 0),
+                        // The DB tier vocabulary is Preferred / Approved / Conditional.
+                        tier: row.supplier_tier || "Conditional",
+                        trend: null,
+                        defectRate: row.defect_rate != null ? Number(row.defect_rate) : null,
+                        rejectRate: row.reject_rate != null ? Number(row.reject_rate) : null,
+                        unitPrice: row.unit_price != null ? Number(row.unit_price) : null,
+                        onTime: row.on_time_pct != null ? Number(row.on_time_pct) : null,
+                        copq: row.copq_amount != null ? Number(row.copq_amount) : null,
+                        spend: row.annual_spend != null ? Number(row.annual_spend) : null,
+                        renewal: row.renewal_date,
+                        contractCode: row.contract_code,
+                        scope: row.scope,
+                        inspections: Number(row.inspections || 0),
+                        shipments: Number(row.shipment_count || 0),
                     };
                 });
                 setSuppliers(parsed);
@@ -69,18 +93,35 @@ export default function SupplierAnalytics() {
             .sort((a, b) => {
                 if (sortBy === "name") return a.name.localeCompare(b.name);
                 if (sortBy === "rating") return b.score - a.score;
-                if (sortBy === "defect") return a.defectRate - b.defectRate;
-                if (sortBy === "ontime") return b.onTime - a.onTime;
+                if (sortBy === "defect") return (a.defectRate ?? Infinity) - (b.defectRate ?? Infinity);
+                if (sortBy === "ontime") return (b.onTime ?? -1) - (a.onTime ?? -1);
                 return b.score - a.score;
             });
     }, [scopedSuppliers, tierFilter, searchQuery, sortBy]);
+
+    // Axis ranges for the scatter plot, from the data actually loaded.
+    const priceRange = useMemo(() => {
+        const values = scopedSuppliers.map((s) => Number(s.unitPrice)).filter((v) => Number.isFinite(v));
+        if (!values.length) return { min: 0, max: 0, span: 0 };
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        return { min, max, span: max - min };
+    }, [scopedSuppliers]);
+
+    const defectRange = useMemo(() => {
+        const values = scopedSuppliers.map((s) => Number(s.defectRate)).filter((v) => Number.isFinite(v));
+        if (!values.length) return { min: 0, max: 0, span: 0 };
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        return { min, max, span: max - min };
+    }, [scopedSuppliers]);
 
     const stats = useMemo(() => {
         if (!scopedSuppliers.length) return { avgScore: 0, preferredCount: 0, watchlistCount: 0, totalSpend: 0 };
         const totalScore = scopedSuppliers.reduce((acc, s) => acc + s.score, 0);
         const preferred = scopedSuppliers.filter((s) => s.tier === "Preferred").length;
-        const watchlist = scopedSuppliers.filter((s) => s.tier === "Watchlist").length;
-        const spend = scopedSuppliers.reduce((acc, s) => acc + s.spend, 0);
+        const watchlist = scopedSuppliers.filter((s) => s.tier === "Conditional").length;
+        const spend = scopedSuppliers.reduce((acc, s) => acc + (Number(s.spend) || 0), 0);
         return {
             avgScore: (totalScore / scopedSuppliers.length).toFixed(1),
             preferredCount: preferred,
@@ -105,24 +146,24 @@ export default function SupplierAnalytics() {
                 <div className="kpi-card">
                     <span>Active Suppliers</span>
                     <strong>{scopedSuppliers.length}</strong>
-                    <small className="positive">100% database verified</small>
+                    <small>{scopedSuppliers.reduce((acc, s) => acc + s.inspections, 0).toLocaleString()} inspections on record</small>
                 </div>
                 <div className="kpi-card">
                     <span>Average Quality Score</span>
                     <strong>{stats.avgScore}</strong>
-                    <small>Target: 88.0 pts</small>
+                    <small>Target: {target != null ? `${target} pts` : "—"}</small>
                 </div>
                 <div className="kpi-card">
                     <span>Preferred Tier Rate</span>
                     <strong>{scopedSuppliers.length ? Math.round((stats.preferredCount / scopedSuppliers.length) * 100) : 0}%</strong>
-                    <small>{stats.preferredCount} top-tier mills</small>
+                    <small>{stats.preferredCount} Preferred suppliers</small>
                 </div>
                 <div className="kpi-card">
                     <span>Watchlist Exposure</span>
                     <strong style={{ color: stats.watchlistCount > 0 ? "var(--danger)" : "inherit" }}>
                         {stats.watchlistCount}
                     </strong>
-                    <small>Mills requiring inspection hold</small>
+                    <small>Conditional tier · {stats.totalSpend ? `$${Math.round(stats.totalSpend).toLocaleString()} total spend` : "no contract on file"}</small>
                 </div>
             </section>
 
@@ -137,7 +178,7 @@ export default function SupplierAnalytics() {
                 />
                 <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
                 <div className="filter-pills">
-                    {["All", "Preferred", "Standard", "Watchlist"].map((t) => (
+                    {["All", "Preferred", "Approved", "Conditional"].map((t) => (
                         <button
                             key={t}
                             className={tierFilter === t ? "is-active" : ""}
@@ -164,15 +205,21 @@ export default function SupplierAnalytics() {
                     <div className="card-heading">
                         <div>
                             <span className="section-label">Interactive Quality Matrix</span>
-                            <h2>Effective Cost vs. Defect Rate Scatter Plot</h2>
+                            <h2>Contract Unit Price vs. Defect Rate</h2>
                         </div>
                         <span className="trend-chip positive">Click any point to inspect</span>
                     </div>
 
                     <div className="scatter-plot" style={{ position: "relative", height: "260px", background: "#fafbf8", borderRadius: "8px", border: "1px solid #dce4dc" }}>
                         {scopedSuppliers.map((s) => {
-                            const leftPct = Math.max(8, Math.min(90, (s.effectiveCost - 3.1) * 90));
-                            const bottomPct = Math.max(10, Math.min(88, s.defectRate * 14));
+                            // Axes are scaled to the real spread of the loaded data, so a point
+                            // position means something instead of fitting an assumed range.
+                            const leftPct = priceRange.span
+                                ? 8 + ((Number(s.unitPrice || priceRange.min) - priceRange.min) / priceRange.span) * 82
+                                : 50;
+                            const bottomPct = defectRange.span
+                                ? 10 + ((Number(s.defectRate || 0) - defectRange.min) / defectRange.span) * 78
+                                : 50;
                             const isSel = selectedSupplier?.id === s.id;
 
                             return (
@@ -188,24 +235,24 @@ export default function SupplierAnalytics() {
                                         transition: "transform 150ms ease",
                                     }}
                                     onClick={() => setSelectedSupplier(s)}
-                                    title={`${s.name}: Score ${s.score}, $${s.effectiveCost}/yd, ${s.defectRate}% defects`}
+                                    title={`${s.name}: quality ${s.score}, ${s.unitPrice != null ? `$${s.unitPrice}/unit` : "no contract"}, ${s.defectRate ?? "—"} defects/inspection`}
                                 >
                                     {s.initials}
                                 </button>
                             );
                         })}
                         <span className="scatter-x" style={{ right: "12px", bottom: "8px", fontFamily: "DM Mono", fontSize: "0.62rem" }}>
-                            Higher Effective Cost ($/yd) →
+                            Higher Contract Unit Price ($) →
                         </span>
                         <span className="scatter-y" style={{ top: "12px", left: "10px", fontFamily: "DM Mono", fontSize: "0.62rem" }}>
-                            Higher Defect Rate % ↑
+                            More Defects per Inspection ↑
                         </span>
                     </div>
 
                     <div className="chart-legend" style={{ marginTop: "14px" }}>
-                        <span><i className="legend-dot" style={{ background: "#2e8d68" }} /> Preferred (&gt;90 pts)</span>
-                        <span><i className="legend-dot" style={{ background: "#6e9f7e" }} /> Standard (80-89 pts)</span>
-                        <span><i className="legend-dot" style={{ background: "#db9940" }} /> Watchlist (&lt;80 pts)</span>
+                        <span><i className="legend-dot" style={{ background: "#2e8d68" }} /> Preferred</span>
+                        <span><i className="legend-dot" style={{ background: "#6e9f7e" }} /> Approved</span>
+                        <span><i className="legend-dot" style={{ background: "#db9940" }} /> Conditional</span>
                     </div>
                 </article>
 
@@ -227,28 +274,28 @@ export default function SupplierAnalytics() {
 
                                 <div className="supplier-stat-grid" style={{ marginTop: "12px" }}>
                                     <div>
-                                        <span>Quality Rating</span>
+                                        <span>Measured Quality</span>
                                         <b style={{ fontSize: "1.2rem", color: "var(--accent-dark)" }}>{selectedSupplier.score}/100</b>
                                     </div>
                                     <div>
-                                        <span>Defect Rate</span>
-                                        <b>{selectedSupplier.defectRate}%</b>
+                                        <span>Defects / Inspection</span>
+                                        <b>{selectedSupplier.defectRate ?? "—"}</b>
                                     </div>
                                     <div>
-                                        <span>Effective Cost</span>
-                                        <b>${selectedSupplier.effectiveCost.toFixed(2)}/yd</b>
+                                        <span>Contract Unit Price</span>
+                                        <b>{selectedSupplier.unitPrice != null ? `$${selectedSupplier.unitPrice}` : "—"}</b>
                                     </div>
                                     <div>
                                         <span>On-Time Delivery</span>
-                                        <b>{selectedSupplier.onTime}%</b>
+                                        <b>{selectedSupplier.onTime != null ? `${selectedSupplier.onTime}%` : "—"}</b>
                                     </div>
                                     <div>
-                                        <span>COPQ Exposure</span>
-                                        <b>${selectedSupplier.copq.toLocaleString()}</b>
+                                        <span>COPQ Recorded</span>
+                                        <b>{selectedSupplier.copq != null ? `$${Math.round(selectedSupplier.copq).toLocaleString()}` : "—"}</b>
                                     </div>
                                     <div>
-                                        <span>Allocated Spend</span>
-                                        <b>${selectedSupplier.spend}k</b>
+                                        <span>Annual Spend</span>
+                                        <b>{selectedSupplier.spend != null ? `$${Math.round(selectedSupplier.spend).toLocaleString()}` : "—"}</b>
                                     </div>
                                 </div>
                             </div>
@@ -292,7 +339,7 @@ export default function SupplierAnalytics() {
                                 <small>{s.city}, {s.country} · {s.contact}</small>
                             </span>
                             <span className={`tier-badge tier-badge--${s.tier.toLowerCase()}`}>{s.tier}</span>
-                            <span className={`trend-label trend-label--${s.trend.toLowerCase()}`}>{s.trend}</span>
+                            <span className="trend-label">{s.rejectRate != null ? `${s.rejectRate}% rejected` : "no inspections"}</span>
                             <strong>{s.score}</strong>
                             <Link
                                 to={`/suppliers?selected=${s.id}`}

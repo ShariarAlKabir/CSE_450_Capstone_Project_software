@@ -1,0 +1,2 @@
+wget -O ~/camera_server.py http://192.168.0.5:5174/camera_server.py
+python3 ~/camera_server.py --port 8081

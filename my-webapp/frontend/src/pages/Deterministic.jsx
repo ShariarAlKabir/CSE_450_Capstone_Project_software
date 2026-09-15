@@ -3,6 +3,7 @@ import axios from "axios";
 
 import { API_BASE_URL } from "../config.js";
 import AppShell from "../components/AppShell";
+import CameraCapture from "../components/CameraCapture";
 
 function Deterministic() {
     const [golden, setGolden] = useState(null);
@@ -25,13 +26,10 @@ function Deterministic() {
         };
     }, [goldenPreview, candidatePreview]);
 
-    const handleFileChange = (event, type) => {
-        const file = event.target.files?.[0];
-
+    const applyFile = (file, type) => {
         if (!file) {
             return;
         }
-
         const previewUrl = URL.createObjectURL(file);
 
         if (type === "golden") {
@@ -53,6 +51,8 @@ function Deterministic() {
         setResult(null);
         setError("");
     };
+
+    const handleFileChange = (event, type) => applyFile(event.target.files?.[0], type);
 
     const handleInspect = async () => {
         if (!golden || !candidate) {
@@ -146,6 +146,13 @@ function Deterministic() {
                         />
                     </label>
 
+                    <CameraCapture
+                        onCapture={(file) => applyFile(file, "golden")}
+                        disabled={loading}
+                        label="Capture golden photo"
+                        hint="Capture the approved reference label with the device camera."
+                    />
+
                     {golden && (
                         <div className="file-meta">
                             <span className="status-pill status-pill--neutral">
@@ -199,6 +206,13 @@ function Deterministic() {
                             disabled={loading}
                         />
                     </label>
+
+                    <CameraCapture
+                        onCapture={(file) => applyFile(file, "candidate")}
+                        disabled={loading}
+                        label="Capture candidate photo"
+                        hint="Capture the production sample with the device camera."
+                    />
 
                     {candidate && (
                         <div className="file-meta">

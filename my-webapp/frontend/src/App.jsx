@@ -16,6 +16,7 @@ import SupplierAnalytics from "./pages/SupplierAnalytics";
 import ShipmentAnalytics from "./pages/ShipmentAnalytics";
 import InspectionAnalytics from "./pages/InspectionAnalytics";
 import QualityRoiAnalytics from "./pages/QualityRoiAnalytics";
+import Blueprint from "./pages/Blueprint";
 
 function App() {
     return (
@@ -52,6 +53,7 @@ function App() {
                 <Route path="/inspections" element={<Inspections />} />
                 <Route path="/inspections/:inspectionId" element={<InspectionDetail />} />
                 <Route path="/reports" element={<Reports />} />
+                <Route path="/blueprint" element={<Blueprint />} />
                 <Route path="/notifications" element={<Notifications />} />
                 <Route path="/account" element={<Account />} />
 

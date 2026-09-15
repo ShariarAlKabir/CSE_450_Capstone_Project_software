@@ -5,12 +5,11 @@ import axios from "axios";
 import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import { TrendChart } from "../components/Visuals";
-import { activity } from "../data/operationsData";
 
-const scopes = ["All", "Fabric", "Label"];
+const scopes = ["Fabric", "Label", "All"];
 
 function Home() {
-    const [scope, setScope] = useState("All");
+    const [scope, setScope] = useState("Fabric");
     const [period, setPeriod] = useState("This month");
     const [stats, setStats] = useState(null);
     const [inspections, setInspections] = useState([]);
@@ -21,39 +20,49 @@ function Home() {
             .then((response) => setStats(response.data))
             .catch(() => setStats(null));
 
-        axios.get(`${API_BASE_URL}/api/fabric/inspections`)
-            .then((response) => setInspections(response.data?.inspections || []))
+        Promise.all([
+            axios.get(`${API_BASE_URL}/api/fabric/inspections`),
+            axios.get(`${API_BASE_URL}/api/label/inspections`),
+        ])
+            .then(([fabricResponse, labelResponse]) => {
+                const fabric = (fabricResponse.data?.inspections || []).map((item) => ({ ...item, scope: "Fabric" }));
+                const label = (labelResponse.data?.inspections || []).map((item) => ({ ...item, scope: "Label" }));
+                setInspections([...fabric, ...label]);
+            })
             .catch(() => setInspections([]));
 
-        axios.get(`${API_BASE_URL}/api/fabric/suppliers`)
-            .then((response) => {
-                const rows = response.data?.suppliers || [];
-                setSuppliers(rows.map((row) => {
-                    const score = Math.round(Number(row.supplier_rating || 85));
+        Promise.all([
+            axios.get(`${API_BASE_URL}/api/fabric/suppliers`),
+            axios.get(`${API_BASE_URL}/api/label/suppliers`),
+        ])
+            .then(([fabricResponse, labelResponse]) => {
+                const shape = (row, itemScope) => {
                     return {
-                        id: `sup-${String(row.supplier_id).padStart(2, "0")}`,
+                        id: `${itemScope === "Label" ? "lbl" : "sup"}-${String(row.supplier_id).padStart(2, "0")}`,
                         name: row.name,
                         initials: row.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase(),
-                        scope: "Fabric",
-                        tier: score >= 90 ? "Preferred" : score >= 80 ? "Standard" : "Watchlist",
-                        score,
-                        rejections: score < 80 ? 1 : 0,
-                        fingerprint: "Database-sourced supplier",
+                        scope: itemScope,
+                        tier: row.supplier_tier || "Conditional",
+                        score: row.avg_quality != null ? Math.round(Number(row.avg_quality)) : null,
+                        rejections: Number(row.rejects || 0),
                     };
-                }));
+                };
+                setSuppliers([
+                    ...(fabricResponse.data?.suppliers || []).map((row) => shape(row, "Fabric")),
+                    ...(labelResponse.data?.suppliers || []).map((row) => shape(row, "Label")),
+                ]);
             })
             .catch(() => setSuppliers([]));
     }, [scope, period]);
 
     const matchesScope = (item) => scope === "All" || item.scope === scope;
     const visibleInspections = inspections.filter(matchesScope);
-    const visibleSuppliers = suppliers.filter(matchesScope);
     const analyticsLink = (view) => `/analytics/${view}?scope=${scope}&period=${encodeURIComponent(period)}`;
 
     const totalSuppliers = stats?.total_suppliers ?? suppliers.length;
     const totalShipments = stats?.total_shipments ?? 0;
     const totalInspections = stats?.total_inspections ?? inspections.length;
-    const avgQuality = stats?.avg_quality ?? 85;
+    const avgQuality = stats?.avg_quality ?? null;
 
     return (
         <OperationsShell
@@ -88,8 +97,8 @@ function Home() {
                 </Link>
                 <Link className="kpi-card kpi-card--quality" to={analyticsLink("roi")}>
                     <span className="kpi-card__header"><span><i />Avg. quality score</span><small>{scope} / {period}</small></span>
-                    <strong>{avgQuality}<em>/100</em></strong>
-                    <span className="kpi-card__meter"><i style={{ "--progress": `${Math.min(avgQuality, 100)}%` }} /></span>
+                    <strong>{avgQuality ?? "—"}<em>/100</em></strong>
+                    <span className="kpi-card__meter"><i style={{ "--progress": `${Math.min(avgQuality ?? 0, 100)}%` }} /></span>
                     <span className="kpi-card__action">Quality trends <b aria-hidden="true">→</b></span>
                 </Link>
             </section>
@@ -98,9 +107,9 @@ function Home() {
                 <article className="workspace-card workspace-card--large quality-visual-card">
                     <div className="card-heading"><div><span className="section-label">Quality pulse / {scope}</span><h2>Quality trend</h2></div><Link className="visual-link" to={analyticsLink("quality")}>Explore <b>→</b></Link></div>
                     <Link className="interactive-chart" to={analyticsLink("quality")} aria-label="Open detailed quality analysis">
-                        <TrendChart values={stats?.trend || [avgQuality]} label="Accepted quality trend" />
+                        <TrendChart values={stats?.trend || []} months={stats?.trend_months} label="Accepted quality trend" />
                     </Link>
-                    <div className="chart-legend"><span><i className="legend-dot legend-dot--accent" />Current <b>{Math.round(avgQuality)}</b></span><span>Target <b>92</b></span><Link to={analyticsLink("defects")}>Defects →</Link></div>
+                    <div className="chart-legend"><span><i className="legend-dot legend-dot--accent" />Current <b>{avgQuality != null ? Math.round(avgQuality) : "—"}</b></span><span>Target <b>{stats?.quality_target ?? "—"}</b></span><Link to={analyticsLink("defects")}>Defects →</Link></div>
                 </article>
                 <article className="workspace-card roi-summary-card">
                     <div className="card-heading"><div><span className="section-label">Efficiency / {period}</span><h2>Time returned</h2></div><Link className="visual-link" to={analyticsLink("quality")}>Explore <b>→</b></Link></div>
@@ -116,20 +125,30 @@ function Home() {
             <section className="dashboard-grid dashboard-grid--two">
                 <article className="workspace-card attention-card">
                     <div className="card-heading"><div><span className="section-label">Decision required</span><h2>Supplier watch</h2></div><Link to="/suppliers">Open supplier detail</Link></div>
-                    {visibleSuppliers.filter((supplier) => supplier.tier === "Watchlist" || supplier.rejections).map((supplier) => (
-                        <Link to={`/suppliers?selected=${supplier.id}`} className="attention-item" key={supplier.id} style={{ textDecoration: "none", color: "inherit" }}>
-                            <span className="avatar avatar--warning">{supplier.initials}</span>
-                            <div><strong>{supplier.name}</strong><small>{supplier.scope} · {supplier.rejections} rejection streak · {supplier.fingerprint}</small></div>
-                            <b>{supplier.score}</b>
-                        </Link>
-                    ))}
+                    {(stats?.supplier_watch || []).map((supplier) => {
+                        const supplierId = `${supplier.scope === "Label" ? "lbl" : "sup"}-${String(supplier.supplier_id).padStart(2, "0")}`;
+                        const initials = supplier.name.split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+                        return (
+                            <Link to={`/suppliers?selected=${supplierId}`} className="attention-item" key={supplierId} style={{ textDecoration: "none", color: "inherit" }}>
+                                <span className="avatar avatar--warning">{initials}</span>
+                                <div>
+                                    <strong>{supplier.name}</strong>
+                                    <small>{supplier.scope} · {supplier.reason}</small>
+                                </div>
+                                <b>{Math.round(supplier.avg_quality)}</b>
+                            </Link>
+                        );
+                    })}
+                    {!stats?.supplier_watch?.length && (
+                        <p style={{ padding: "14px 4px", opacity: 0.7 }}>No suppliers currently need attention.</p>
+                    )}
                     <Link className="attention-callout" to="/suppliers">Compare suppliers <b>→</b></Link>
                 </article>
                 <article className="workspace-card">
                     <div className="card-heading"><div><span className="section-label">Recent inspections / {scope}</span><h2>Review queue</h2></div><Link to="/inspections">Detailed queue</Link></div>
                     <div className="compact-table">
                         {visibleInspections.slice(0, 3).map((inspection) => (
-                            <Link to="/fabric-inspection" className="compact-table__row" key={inspection.id}>
+                            <Link to={`/inspections/${inspection.scope === "Label" ? inspection.id : String(inspection.id).replace("IN-", "")}`} className="compact-table__row" key={inspection.id}>
                                 <span><b>{inspection.id}</b><small>{inspection.scope} · {inspection.roll} · {inspection.supplier}</small></span>
                                 <span className={`table-status table-status--${inspection.status.toLowerCase().replace(" ", "-")}`}>{inspection.status}</span>
                                 <strong>{inspection.grade}</strong>
@@ -150,7 +169,7 @@ function Home() {
                         <Link to={analyticsLink("shipments")}><i>S</i><span>Shipments<small>Flow</small></span><b>→</b></Link>
                     </div>
                 </article>
-                <article className="workspace-card compact-activity"><div className="card-heading"><div><span className="section-label">Live feed</span><h2>Updates</h2></div><Link to="/notifications">View all →</Link></div>{activity.slice(0, 2).map((item) => <Link to="/notifications" className="activity-item" key={item.title}><i className={"activity-item__dot activity-item__dot--" + item.tone} /><div><strong>{item.title}</strong><small>{item.detail}</small></div><time>{item.time}</time></Link>)}</article>
+                <article className="workspace-card compact-activity"><div className="card-heading"><div><span className="section-label">Live feed</span><h2>Updates</h2></div><Link to="/notifications">View all →</Link></div>{visibleInspections.slice(0, 2).map((item) => <Link to={`/inspections/${item.scope === "Label" ? item.id : String(item.id).replace("IN-", "")}`} className="activity-item" key={item.id}><i className={"activity-item__dot activity-item__dot--" + (item.grade === "Reject" ? "danger" : item.status === "Approved" ? "success" : "warning")} /><div><strong>{item.id} · {item.supplier}</strong><small>{item.scope} · {item.grade} · {item.defects} defects</small></div><time>{item.time}</time></Link>)}</article>
             </section>
         </OperationsShell>
     );

@@ -10,14 +10,19 @@ import { ScoreRing } from "../components/Visuals";
 
 const tierClass = (tier) => (tier || "standard").toLowerCase();
 
-const normalizeSupplier = (row, index) => {
-    const score = Math.max(0, Math.min(100, Number(row.supplier_rating || 85)));
-    const quality = Math.max(0, Math.min(100, Math.round(score)));
-    const cost = Math.max(50, Math.min(100, Math.round(score - 4)));
-    const delivery = Math.max(60, Math.min(100, Math.round(score + 3)));
+// Every field is a column the API measured or a contract amount it read.
+// Cost, delivery, defect rate, COPQ, spend and the quality heatmap used to be
+// arithmetic on the supplier rating, which made unrelated numbers move together.
+const normalizeSupplier = (row) => {
+    const isLabel = row.scope === "Label";
+    const rating = Number(row.supplier_rating || 0);
+    // Measured inspection quality where it exists; the contracted rating is a
+    // separate thing and is shown separately.
+    const quality = row.avg_quality != null ? Number(row.avg_quality) : null;
+    const score = quality != null ? Math.round(quality) : Math.round(rating);
 
     return {
-        id: `sup-${String(row.supplier_id).padStart(2, "0")}`,
+        id: `${isLabel ? "lbl" : "sup"}-${String(row.supplier_id).padStart(2, "0")}`,
         name: row.name,
         initials: row.name
             .split(" ")
@@ -25,26 +30,28 @@ const normalizeSupplier = (row, index) => {
             .slice(0, 2)
             .join("")
             .toUpperCase(),
-        scope: index % 2 === 0 ? "Fabric" : "Label",
-        tier: score >= 90 ? "Preferred" : score >= 80 ? "Standard" : "Watchlist",
-        trend: score >= 90 ? "Improving" : score >= 80 ? "Stable" : "Declining",
-        score: Math.round(score),
+        scope: isLabel ? "Label" : "Fabric",
+        specialty: row.fabric_specialty || row.label_specialty || "—",
+        tier: row.supplier_tier || "Conditional",
+        score,
+        rating,
         quality,
-        cost,
-        delivery,
-        defectRate: Number(((100 - score) / 18).toFixed(1)),
-        effectiveCost: Number((3.2 + ((100 - score) / 40)).toFixed(2)),
-        copq: Math.round((100 - score) * 160 + 1200),
-        onTime: Math.max(60, Math.min(100, Math.round(score + 2))),
-        spend: 15 + index * 5,
+        defectRate: row.defect_rate != null ? Number(row.defect_rate) : null,
+        rejectRate: row.reject_rate != null ? Number(row.reject_rate) : null,
+        unitPrice: row.unit_price != null ? Number(row.unit_price) : null,
+        copq: row.copq_amount != null ? Number(row.copq_amount) : null,
+        onTime: row.on_time_pct != null ? Number(row.on_time_pct) : null,
+        spend: row.annual_spend != null ? Number(row.annual_spend) : null,
+        renewal: row.renewal_date || "—",
+        paymentTerms: row.payment_terms || "—",
+        contractCode: row.contract_code || "—",
         email: row.contact_email || "", phone: row.contact_phone || "",
-        fingerprint: "Database-sourced supplier profile",
-        renewal: "Live data",
         location: `${row.city || "N/A"}, ${row.country || "N/A"}`,
         contact: row.contact_person || "N/A",
-        shipments: 0,
-        rejections: 0,
-        heatmap: Array.from({ length: 12 }, (_, heatIndex) => (heatIndex % 5 === 0 ? "b" : "a")),
+        shipments: Number(row.shipment_count || 0),
+        inspections: Number(row.inspections || 0),
+        avgShipmentQuality: row.avg_shipment_quality != null ? Number(row.avg_shipment_quality) : null,
+        rejections: Number(row.rejects || 0),
     };
 };
 
@@ -56,14 +63,14 @@ function Suppliers() {
     const [compareIds, setCompareIds] = useState([]);
     const [suppliers, setSuppliers] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [scope, setScope] = useState("All");
+    const [scope, setScope] = useState("Fabric");
     const [showAddSupplier, setShowAddSupplier] = useState(false);
     const [profileTab, setProfileTab] = useState("overview");
     const [copied, setCopied] = useState("");
     const [saving, setSaving] = useState(false);
     const [formError, setFormError] = useState("");
     const [form, setForm] = useState({
-        name: "", country: "Bangladesh", city: "Dhaka", contact_person: "", contact_email: "", contact_phone: "", supplier_rating: 85,
+        name: "", country: "", city: "", contact_person: "", contact_email: "", contact_phone: "", supplier_rating: "",
     });
     const updateField = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
     const copyField = async (label, value) => {
@@ -92,7 +99,9 @@ function Suppliers() {
         try {
             await axios.post(`${API_BASE_URL}/api/fabric/suppliers`, {
                 ...form,
-                supplier_rating: Number(form.supplier_rating) || 85,
+                // Blank means "not rated yet" - the API stores NULL rather than
+                // giving a new supplier an unearned score.
+                supplier_rating: form.supplier_rating === "" ? null : Number(form.supplier_rating),
             });
             setShowAddSupplier(false);
             window.location.reload();
@@ -103,10 +112,15 @@ function Suppliers() {
     };
 
     useEffect(() => {
-        axios.get(`${API_BASE_URL}/api/fabric/suppliers`)
-            .then((response) => {
-                const rows = response.data?.suppliers || [];
-                const normalized = rows.map(normalizeSupplier);
+        Promise.all([
+            axios.get(`${API_BASE_URL}/api/fabric/suppliers`),
+            axios.get(`${API_BASE_URL}/api/label/suppliers`),
+        ])
+            .then(([fabricResponse, labelResponse]) => {
+                const normalized = [
+                    ...(fabricResponse.data?.suppliers || []).map((row) => normalizeSupplier({ ...row, scope: "Fabric" })),
+                    ...(labelResponse.data?.suppliers || []).map((row) => normalizeSupplier({ ...row, scope: "Label" })),
+                ];
                 setSuppliers(normalized);
                 if (normalized.length >= 2) {
                     setCompareIds([normalized[0].id, normalized[1].id]);
@@ -125,8 +139,38 @@ function Suppliers() {
     };
     const filtered = useMemo(() => suppliers
         .filter((supplier) => (scope === "All" || supplier.scope === scope) && (tier === "All" || supplier.tier === tier) && supplier.name.toLowerCase().includes(query.toLowerCase()))
-        .sort((a, b) => sortBy === "name" ? a.name.localeCompare(b.name) : b[sortBy] - a[sortBy]),
+        .sort((a, b) => {
+            if (sortBy === "name") return a.name.localeCompare(b.name);
+            // Lower is better for defect rate; every other key sorts high to low.
+            if (sortBy === "defect") return (a.defectRate ?? Infinity) - (b.defectRate ?? Infinity);
+            const key = sortBy === "delivery" ? "onTime" : sortBy;
+            return (Number(b[key]) || -Infinity) - (Number(a[key]) || -Infinity);
+        }),
     [query, sortBy, suppliers, tier, scope]);
+
+    // Scatter axes scale to the spread of the loaded rows, so a point's
+    // position reflects the real data rather than an assumed price band.
+    const scatterBounds = useMemo(() => {
+        const prices = suppliers.map((s) => Number(s.unitPrice)).filter(Number.isFinite);
+        const defects = suppliers.map((s) => Number(s.defectRate)).filter(Number.isFinite);
+        const range = (values) => {
+            if (!values.length) return { min: 0, span: 0 };
+            const min = Math.min(...values);
+            return { min, span: Math.max(...values) - min };
+        };
+        return { price: range(prices), defect: range(defects) };
+    }, [suppliers]);
+
+    const scatterX = (supplier) => {
+        const { min, span } = scatterBounds.price;
+        if (!span || supplier.unitPrice == null) return 50;
+        return 8 + ((Number(supplier.unitPrice) - min) / span) * 82;
+    };
+    const scatterY = (supplier) => {
+        const { min, span } = scatterBounds.defect;
+        if (!span || supplier.defectRate == null) return 50;
+        return 10 + ((Number(supplier.defectRate) - min) / span) * 78;
+    };
     const compared = suppliers.filter((supplier) => compareIds.includes(supplier.id));
 
     const selectSupplier = (id) => setSearchParams({ selected: id });
@@ -167,7 +211,7 @@ function Suppliers() {
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a supplier" aria-label="Find a supplier" />
                 <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
                 <div className="filter-pills">{["All", "Preferred", "Standard", "Watchlist"].map((item) => <button className={tier === item ? "is-active" : ""} onClick={() => setTier(item)} key={item}>{item}</button>)}</div>
-                <label className="select-control">Sort by <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="score">Overall score</option><option value="quality">Quality</option><option value="cost">Cost efficiency</option><option value="delivery">On-time delivery</option><option value="name">Name</option></select></label>
+                <label className="select-control">Sort by <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="score">Measured quality</option><option value="rating">Contract rating</option><option value="defect">Lowest defect rate</option><option value="delivery">On-time delivery</option><option value="spend">Annual spend</option><option value="name">Name</option></select></label>
             </section>
 
             <section className="supplier-layout">
@@ -178,7 +222,7 @@ function Suppliers() {
                                 <span className="avatar">{supplier.initials}</span>
                                 <span><strong>{supplier.name}</strong><small>{supplier.location}</small></span>
                                 <span className={`tier-badge tier-badge--${tierClass(supplier.tier)}`}>{supplier.tier}</span>
-                                <span className={`trend-label trend-label--${supplier.trend.toLowerCase()}`}>{supplier.trend}</span>
+                                <span className="trend-label">{supplier.rejectRate != null ? `${supplier.rejectRate}% rejected` : "no inspections"}</span>
                                 <strong>{supplier.score}</strong>
                                 <label className="compare-toggle" onClick={(event) => event.stopPropagation()}>
                                     <input type="checkbox" checked={compareIds.includes(supplier.id)} onChange={() => toggleComparison(supplier.id)} />Compare
@@ -217,8 +261,8 @@ function Suppliers() {
                         </div>
                         <div className="profile-tags">
                             <span className={`tier-badge tier-badge--${tierClass(selected.tier)}`}>{selected.tier}</span>
-                            <span className={`trend-label trend-label--${selected.trend.toLowerCase()}`}>{selected.trend}</span>
-                            <span>Auto-updated quality rating</span>
+                            <span className="trend-label">{selected.rejectRate != null ? `${selected.rejectRate}% rejected` : "no inspections"}</span>
+                            <span>{selected.inspections} inspections on record</span>
                         </div>
                         <div className="profile-tabs" role="tablist" aria-label="Supplier details">
                             {[["overview", "Overview"], ["contact", "Contact"], ["history", "Quality history"]].map(([key, label]) => (
@@ -228,23 +272,27 @@ function Suppliers() {
                         {profileTab === "overview" && (
                             <div className="profile-tab-panel">
                                 <div className="score-breakdown">
-                                    <div><span>Quality</span><b>{selected.quality}</b><i style={{ width: `${selected.quality}%` }} /></div>
-                                    <div><span>Cost</span><b>{selected.cost}</b><i style={{ width: `${selected.cost}%` }} /></div>
-                                    <div><span>Delivery</span><b>{selected.delivery}</b><i style={{ width: `${selected.delivery}%` }} /></div>
+                                    <div><span>Measured quality</span><b>{selected.quality ?? "—"}</b><i style={{ width: `${selected.quality || 0}%` }} /></div>
+                                    <div><span>Contract rating</span><b>{selected.rating}</b><i style={{ width: `${selected.rating}%` }} /></div>
+                                    <div><span>On-time delivery</span><b>{selected.onTime ?? "—"}</b><i style={{ width: `${selected.onTime || 0}%` }} /></div>
                                 </div>
                                 <div className="supplier-stat-grid">
-                                    <div><span>Defect fingerprint</span><b>{selected.fingerprint}</b></div>
-                                    <div><span>COPQ this quarter</span><b>${selected.copq.toLocaleString()}</b></div>
-                                    <div><span>Effective accepted yard</span><b>${selected.effectiveCost.toFixed(2)}</b></div>
-                                    <div><span>On-time delivery</span><b>{selected.onTime}%</b></div>
+                                    <div><span>Defects per inspection</span><b>{selected.defectRate ?? "—"}</b></div>
+                                    <div><span>COPQ recorded</span><b>{selected.copq != null ? `$${Math.round(selected.copq).toLocaleString()}` : "—"}</b></div>
+                                    <div><span>Contract unit price</span><b>{selected.unitPrice != null ? `$${selected.unitPrice}` : "—"}</b></div>
+                                    <div><span>Inspections on record</span><b>{selected.inspections}</b></div>
                                 </div>
                                 <div className="profile-recommendation">
-                                    <strong>Switch recommendation</strong>
-                                    <p>Current supplier quality is being updated from the live fabric inspection database.</p>
+                                    <strong>{selected.tier === "Preferred" ? "Hold allocation" : "Review allocation"}</strong>
+                                    <p>
+                                        Measured quality {selected.score} against a contract rating of {selected.rating}
+                                        {selected.rejectRate != null && <>, with {selected.rejectRate}% of {selected.inspections} inspections rejected</>}
+                                        {selected.copq != null && <> and ${Math.round(selected.copq).toLocaleString()} of recorded loss</>}.
+                                    </p>
                                 </div>
                                 <div className="profile-footer">
-                                    <span>Contract renewal: <b>{selected.renewal}</b></span>
-                                    <span>Spend coverage: <b>${selected.spend}k</b></span>
+                                    <span>Contract renewal: <b>{selected.renewal}</b> ({selected.paymentTerms})</span>
+                                    <span>Annual spend: <b>{selected.spend != null ? `$${Math.round(selected.spend).toLocaleString()}` : "—"}</b></span>
                                 </div>
                             </div>
                         )}
@@ -277,13 +325,17 @@ function Suppliers() {
                         {profileTab === "history" && (
                             <div className="profile-tab-panel">
                                 <div className="heatmap-section">
-                                    <span className="section-label">Quality history / last 12 lots</span>
-                                    <div className="quality-heatmap">{selected.heatmap.map((grade, index) => <i key={`${grade}-${index}`} className={`heatmap-cell heatmap-cell--${grade}`} title={`Lot ${index + 1}: ${grade.toUpperCase()}`} />)}</div>
-                                    <small>A: pass · B: minor issue · C: needs review · R: rejected</small>
+                                    <span className="section-label">Measured history</span>
+                                    <div className="shipment-detail__facts">
+                                        <div><span>Shipments</span><b>{selected.shipments}</b></div>
+                                        <div><span>Inspections</span><b>{selected.inspections}</b></div>
+                                        <div><span>Rejected</span><b>{selected.rejections}</b></div>
+                                        <div><span>Avg shipment quality</span><b>{selected.avgShipmentQuality ?? "—"}</b></div>
+                                    </div>
                                 </div>
                                 <div className="profile-recommendation">
                                     <strong>Trend outlook</strong>
-                                    <p>{selected.trend} performance with {selected.score} overall. Monitor the next lot for any quality drift before the renewal discussion.</p>
+                                    <p>Measured quality {selected.score} across {selected.inspections} inspections, {selected.rejectRate ?? 0}% rejected. Contract renews {selected.renewal}.</p>
                                 </div>
                             </div>
                         )}
@@ -298,7 +350,7 @@ function Suppliers() {
                     </div>
                     <div className="scatter-plot">
                         {suppliers.filter((supplier) => scope === "All" || supplier.scope === scope).map((supplier) => (
-                            <button key={supplier.id} className={`scatter-point scatter-point--${tierClass(supplier.tier)}`} style={{ left: `${(supplier.effectiveCost - 3.2) * 105}%`, bottom: `${supplier.defectRate * 13}%` }} onClick={() => selectSupplier(supplier.id)} title={`${supplier.name}: $${supplier.effectiveCost} / ${supplier.defectRate}% defect rate`}>
+                            <button key={supplier.id} className={`scatter-point scatter-point--${tierClass(supplier.tier)}`} style={{ left: `${scatterX(supplier)}%`, bottom: `${scatterY(supplier)}%` }} onClick={() => selectSupplier(supplier.id)} title={`${supplier.name}: ${supplier.unitPrice != null ? `$${supplier.unitPrice}/unit` : "no contract"} / ${supplier.defectRate ?? "—"} defects per inspection`}>
                                 {supplier.initials}
                             </button>
                         ))}
@@ -313,8 +365,8 @@ function Suppliers() {
                     {compared.length === 2 ? (
                         <div className="comparison-table">
                             <div><span>Metric</span>{compared.map((supplier) => <b key={supplier.id}>{supplier.initials}</b>)}</div>
-                            {[["Quality", "quality"], ["Cost score", "cost"], ["On-time", "onTime"], ["Defect rate", "defectRate"]].map(([label, key]) => (
-                                <div key={key}><span>{label}</span>{compared.map((supplier) => <b key={supplier.id}>{key === "defectRate" ? `${supplier[key]}%` : key === "onTime" ? `${supplier[key]}%` : supplier[key]}</b>)}</div>
+                            {[["Measured quality", "score"], ["Contract rating", "rating"], ["On-time %", "onTime"], ["Defects / inspection", "defectRate"]].map(([label, key]) => (
+                                <div key={key}><span>{label}</span>{compared.map((supplier) => <b key={supplier.id}>{supplier[key] == null ? "—" : key === "onTime" ? `${supplier[key]}%` : supplier[key]}</b>)}</div>
                             ))}
                         </div>
                     ) : <p>Select two suppliers from the table to compare their performance.</p>}

@@ -1,3 +1,9 @@
+-- ============================================================================
+-- SUPERSEDED: this file describes the OLD shared-schema layout.
+-- The database now uses separate fabric_* / label_* tables.
+-- Use bulk_schema.sql (DDL) and bulk_seed.sql (bulk data) instead.
+-- Kept for historical reference only -- do not run against the current DB.
+-- ============================================================================
 DROP TABLE IF EXISTS defects CASCADE;
 DROP TABLE IF EXISTS inspections CASCADE;
 DROP TABLE IF EXISTS fabric_rolls CASCADE;

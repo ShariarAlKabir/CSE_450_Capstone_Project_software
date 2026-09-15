@@ -7,64 +7,221 @@
 cd my-webapp
 
 # --------------------------------------------------
-# 2) Start PostgreSQL database (local Homebrew install)
+# 2) Start PostgreSQL (Docker) and load the bulk data
 # --------------------------------------------------
-# Make sure PostgreSQL is running:
-brew services start postgresql@16
+docker compose up -d
+docker compose ps                  # wait until the container is healthy
 
-# Create the database (first time only):
-psql -h /tmp -U dipsaha -d postgres -c "CREATE DATABASE fabric_fault_detection;"
+# NOTE: if a container named "fabric-postgres" already exists, compose will
+# refuse to create another one ("container name is already in use"). In that
+# case the container is probably already running - just check it:
+docker port fabric-postgres        # prints the host port it is published on
 
-# Run the table creation and data insertion scripts (first time only):
-psql -h /tmp -U dipsaha -d fabric_fault_detection -f backend/create_table.sql
-psql -h /tmp -U dipsaha -d fabric_fault_detection -f backend/insert_table.sql
+# First time only (or whenever you want to rebuild the tables and data):
+# this DROPS and recreates every fabric_* / label_* table.
+docker cp backend/bulk_schema.sql fabric-postgres:/tmp/bulk_schema.sql
+docker cp backend/bulk_seed.sql   fabric-postgres:/tmp/bulk_seed.sql
+docker exec fabric-postgres psql -U postgres -d fabric_fault_detection -f /tmp/bulk_schema.sql
+docker exec fabric-postgres psql -U postgres -d fabric_fault_detection -f /tmp/bulk_seed.sql
 
-# If you need to reset the database later:
-psql -h /tmp -U dipsaha -d fabric_fault_detection -f backend/init_db.sql
+# To refresh only the data (schema unchanged), re-run just bulk_seed.sql.
+# To connect to the database by hand:
+#   docker exec -it fabric-postgres psql -U postgres -d fabric_fault_detection
 
 # --------------------------------------------------
 # 3) Start the backend (FastAPI)
 # --------------------------------------------------
-# Open a new terminal and run:
+# IMPORTANT: backend/app/db.py defaults to a LOCAL Homebrew socket database
+# (host=/tmp, user "dipsaha"). To use the Docker database you must pass the
+# connection settings as environment variables.
+
 cd my-webapp/backend
 source .venv/bin/activate
 pip install -r requirements.txt
+
+# Set DB_PORT to the host port reported by "docker port fabric-postgres".
+# A fresh "docker compose up" publishes 5432. The pre-existing container on this
+# machine publishes 5434, so use that value here.
+DB_HOST=127.0.0.1 DB_PORT=5434 DB_NAME=fabric_fault_detection \
+DB_USER=postgres DB_PASSWORD=1234 \
+CAMERA_STREAM_URL=http://<pi-ip>:8081/stream.mjpg \
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
-# Backend URL:
-# http://localhost:8000
-# Test it with:
-# curl http://localhost:8000/
+# CAMERA_STREAM_URL is optional. Without it the app still runs; the capture
+# dialog simply falls back to the device camera or the file picker.
+
+# Backend URL: http://localhost:8000
+# Test it with: curl http://localhost:8000/
 
 # --------------------------------------------------
 # 4) Start the frontend (React + Vite)
 # --------------------------------------------------
-# Open another new terminal and run:
 cd my-webapp/frontend
 npm install
 npm run dev -- --host 0.0.0.0
 
-# Frontend URL:
-# http://localhost:5173
+# Frontend URL: http://localhost:5173
+# If 5173 is busy Vite automatically uses 5174, then 5175.
 
 # --------------------------------------------------
-# 5) Useful notes
+# 5) Database layout
 # --------------------------------------------------
-# - The backend connects to PostgreSQL via Unix socket (/tmp) with user dipsaha
-# - Database name: fabric_fault_detection
-# - Frontend usually runs on port 5173
-# - If port 5173 is busy, run:
-# npm run dev -- --host 0.0.0.0 --port 5174
+# Fabric domain:
+#   fabric_suppliers -> fabric_shipments -> fabric_rolls
+#                    -> fabric_inspections -> fabric_defects
+#
+# Label domain:
+#   label_suppliers -> label_shipments -> label_templates -> label_samples
+#                   -> label_inspections -> label_defects
+#
+# Economics domain (everything the Reports / ROI / COPQ screens show):
+#   cost_parameters     - rate assumptions per scope (minutes, labour cost,
+#                         reject cost, manual detection rate, quality target)
+#   system_investments  - what adopting the platform cost; drives payback
+#   copq_events         - one recorded loss per inspection that went wrong
+#   supplier_contracts  - annual spend, unit price, renewal date per supplier
+#
+# People domain:
+#   app_users, inspection_notes
+#
+# Seed data characteristics:
+#   - 28 fabric suppliers, 22 label suppliers
+#   - 2-6 shipments per supplier, more shipments for higher-rated suppliers
+#   - shipment quality tracks supplier rating; roll quality tracks shipment quality
+#   - 2-14 defects per inspected roll, drawn only from the SEVEN classes the
+#     RT-DETR model emits, with the model's own severity map
+#
+# --------------------------------------------------
+# 5b) The quality metric (read this before touching scoring)
+# --------------------------------------------------
+# fabric_inspections.points_per_100_yards is the standard textile FOUR-POINT
+# score and LOWER IS BETTER:
+#
+#     total_penalty_points = SUM(severity of each defect)      (1..4 each)
+#     points_per_100_yards = total_penalty_points * 100 / roll_length_yards
+#     grade                = A <=10, B <=20, C <=30, else Reject
+#
+# The dashboards show a 0-100 "higher is better" score, which is
+#     quality = 100 - MIN(points, 100)
+#
+# All of this lives in ONE place: backend/app/quality.py. bulk_seed.sql step 6b
+# and the live inspection path both use it, so a freshly inspected roll and a
+# seeded roll mean the same thing and can share an average. If you change the
+# thresholds, change them in quality.py and in bulk_seed.sql step 6b together.
+#
+# The label domain's comparable score is ssim_score * 100, already 0-100.
+#
+# --------------------------------------------------
+# 5c) The label verdict vocabulary
+# --------------------------------------------------
+# label_inspections.verdict may only be PASS, REVIEW or REJECT -- enforced by a
+# CHECK constraint, because three different vocabularies were in use before:
+# the seed wrote PASS/REVIEW/REJECT, the deterministic pipeline wrote
+# REJECT_GATE1/REJECT_GATE2, and the non-deterministic model wrote
+# 'Pass'/'Review'. Nothing matched those last two, so a PASSING label graded as
+# Reject and raised an alert.
+#
+# The specific reason goes in verdict_detail (e.g. REJECT_GATE2, or the
+# predicted fault class). Readers normalise with app.quality.canonical_verdict
+# / LABEL_VERDICT_SQL, so older rows still behave.
+#
+# Grading: REJECT -> Reject, PASS -> A, otherwise the SSIM bands, and a REVIEW
+# with no SSIM is grade C (needs sign-off), never Reject.
+#
+# Both label routes accept an optional sample_id. Without it the inspection
+# cannot be traced to a shipment or supplier and shows as an ad-hoc capture.
+#
+# --------------------------------------------------
+# 5d) The shipment clearance rule
+# --------------------------------------------------
+# cost_parameters.clearance_score decides whether a lot at the Final sampling
+# stage reads as Cleared or Rejected. The API computes the `lifecycle` field;
+# the frontend only displays it. That rule used to be copy-pasted as
+# "quality >= 80" in three separate components.
+#
+# Invariant that must hold for every fabric_inspections row:
+#   docker exec fabric-postgres psql -U postgres -d fabric_fault_detection -c \
+#     "SELECT COUNT(*) AS violations FROM fabric_inspections i
+#      JOIN fabric_rolls fr ON fr.roll_id = i.roll_id
+#      LEFT JOIN (SELECT inspection_id, COUNT(*) c, SUM(severity) p
+#                 FROM fabric_defects GROUP BY 1) d
+#             ON d.inspection_id = i.inspection_id
+#      WHERE i.total_defects_found  <> COALESCE(d.c,0)
+#         OR i.total_penalty_points <> COALESCE(d.p,0);"
+#   -> must return 0.
 
 # --------------------------------------------------
-# 6) If you need to reinstall backend packages
+# 6) Superseded files - do not run these
 # --------------------------------------------------
-# cd my-webapp/backend
-# source .venv/bin/activate
-# pip install -r requirements.txt
+# create_table.sql, insert_table.sql, init_db.sql, label_tables.sql and
+# update_realistic_defects.sql describe the OLD shared schema
+# (suppliers/shipments/inspections/defects). They are kept for reference only.
+# Use bulk_schema.sql + bulk_seed.sql instead.
 
 # --------------------------------------------------
-# 7) If you need to reinstall frontend packages
+# 5) Optional: capture photos from another device (HTTPS)
 # --------------------------------------------------
-# cd my-webapp/frontend
-# npm install
+# Browsers only expose the camera API (getUserMedia) on https:// or localhost.
+# To use the "Capture photo" buttons from a phone, tablet or Pi on the LAN:
+#
+# a) Create a self-signed certificate once (use this machine's LAN IP):
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -nodes -days 825 \
+  -keyout certs/dev-key.pem -out certs/dev-cert.pem \
+  -subj "/CN=192.168.0.5" \
+  -addext "subjectAltName=IP:192.168.0.5,IP:127.0.0.1,DNS:localhost"
+#
+# b) Start the backend with TLS (same DB env vars as step 3, plus):
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 \
+  --ssl-keyfile ../certs/dev-key.pem --ssl-certfile ../certs/dev-cert.pem
+#
+# c) Start the frontend with TLS:
+cd my-webapp/frontend
+TLS_CERT_DIR=../certs npm run dev
+#
+# d) On the other device open https://192.168.0.5:5174 and accept the
+#    self-signed certificate warning once. The API is then reached at
+#    https://192.168.0.5:8000 using the same certificate.
+#
+# Without HTTPS, "Capture photo" falls back to the device's own camera/file
+# picker. That works on phones but cannot reach a camera attached to the
+# machine running the backend.
+#
+# Raspberry Pi camera note: the camera must be exposed to the browser as a
+# normal video device (USB/UVC, or libcamera through V4L2). A remote MJPEG or
+# RTSP stream from a separate Pi is not reachable through the browser camera
+# API and would need a backend capture endpoint instead.
+
+# --------------------------------------------------
+# 6) Raspberry Pi camera (separate device on the network)
+# --------------------------------------------------
+# The Pi runs a small MJPEG server; the backend proxies it, so the browser
+# only ever talks to the backend (no mixed-content or CORS problems).
+#
+# On the Pi (Camera Module):
+sudo apt update && sudo apt install -y python3-picamera2
+# enable the camera once: sudo raspi-config -> Interface Options -> Camera
+scp pi/camera_server.py pi@<pi-ip>:~/
+python3 ~/camera_server.py --port 8081
+#
+# USB webcam instead of the Camera Module:
+python3 ~/camera_server.py --source usb --port 8081
+#
+# Verify from the machine running the backend:
+curl http://<pi-ip>:8081/health
+curl -o /tmp/pi-test.jpg http://<pi-ip>:8081/snapshot.jpg
+#
+# Point the backend at the Pi (add to the step-3 uvicorn command):
+CAMERA_STREAM_URL=http://<pi-ip>:8081/stream.mjpg
+#
+# The capture dialog then shows a "Pi camera" tab with a live preview.
+# "Capture" pulls a full-resolution frame via /api/camera/snapshot and feeds
+# it into the normal fabric / label inspection upload.
+#
+# Notes:
+#   - The Pi server binds 0.0.0.0:8081 with no authentication; keep it on the
+#     trusted LAN only.
+#   - This works over plain HTTP as well as HTTPS, because the browser talks to
+#     the backend, not to the Pi directly.
+#   - Set CAMERA_SNAPSHOT_URL only if the Pi serves snapshots on a different
+#     path than /snapshot.jpg next to the stream.

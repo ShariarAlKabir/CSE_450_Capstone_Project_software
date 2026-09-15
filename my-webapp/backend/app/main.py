@@ -2,8 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes.deterministic import router as deterministic_router
+from app.routes.economics import router as economics_router
+from app.routes.camera import router as camera_router
 from app.routes.fabric import router as fabric_router
+from app.routes.label import router as label_router
 from app.routes.non_deterministic import router as non_deterministic_router
+from app.routes.workspace import router as workspace_router
 
 
 app = FastAPI(
@@ -19,7 +23,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+):(5173|5174|5175|3000)",
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+):(5173|5174|5175|3000)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -35,9 +39,19 @@ app.include_router(
 )
 
 app.include_router(
+    camera_router
+)
+
+app.include_router(
     fabric_router
 )
+
+app.include_router(
+    label_router
+)
 app.include_router(non_deterministic_router)
+app.include_router(economics_router)
+app.include_router(workspace_router)
 
 
 # --------------------------------------------------

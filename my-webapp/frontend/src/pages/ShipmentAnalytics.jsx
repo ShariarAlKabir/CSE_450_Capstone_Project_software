@@ -12,46 +12,66 @@ export default function ShipmentAnalytics() {
     const [fabricFilter, setFabricFilter] = useState("All");
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedShipment, setSelectedShipment] = useState(null);
-    const [scope, setScope] = useState("All");
+    const [scope, setScope] = useState("Fabric");
+    const [target, setTarget] = useState(null);
+
+    useEffect(() => {
+        axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope } })
+            .then((response) => setTarget(response.data?.quality_target ?? null))
+            .catch(() => setTarget(null));
+    }, [scope]);
 
     useEffect(() => {
         Promise.all([
             axios.get(`${API_BASE_URL}/api/fabric/suppliers`),
+            axios.get(`${API_BASE_URL}/api/label/shipments`),
             axios.get(`${API_BASE_URL}/api/fabric/shipments`),
         ])
-            .then(([supRes, shpRes]) => {
+            .then(([supRes, labelRes, shpRes]) => {
                 const supMap = {};
                 (supRes.data?.suppliers || []).forEach((s) => {
                     supMap[s.supplier_id] = s.name;
                 });
 
-                const parsed = (shpRes.data?.shipments || []).map((row, idx) => {
+                const rows = [
+                    ...(shpRes.data?.shipments || []).map((row) => ({ ...row, scope: "Fabric", supplierName: supMap[row.supplier_id] })),
+                    ...(labelRes.data?.shipments || []).map((row) => ({
+                        ...row,
+                        scope: "Label",
+                        supplierName: row.supplier,
+                        total_rolls: row.total_samples,
+                        fabric_type: row.label_type,
+                        color: row.material,
+                        inspected_rolls: row.inspected_samples,
+                        uninspected_rolls: Math.max(Number(row.total_samples || 0) - Number(row.inspected_samples || 0), 0),
+                    })),
+                ];
+
+                const parsed = rows.map((row, idx) => {
                     const quality = row.quality_score != null ? Number(row.quality_score) : null;
-                    let lifecycle;
-                    if (quality == null) {
-                        lifecycle = "In transit";
-                    } else if (row.sampling_stage === "Final" && quality >= 80) {
-                        lifecycle = "Cleared";
-                    } else if (row.sampling_stage === "Final" && quality < 80) {
-                        lifecycle = "Rejected";
-                    } else {
-                        lifecycle = "Inspecting";
-                    }
+                    // Lifecycle comes from the API (cost_parameters.clearance_score),
+                    // so the clearance rule is defined once rather than in each page.
+                    const lifecycle = row.lifecycle;
 
                     return {
                         id: row.shipment_code || `SHP-${row.shipment_id}`,
                         dbId: row.shipment_id,
-                        supplier: supMap[row.supplier_id] || "Textile Supplier",
+                        supplier: row.supplierName || "Unknown supplier",
                         supplierId: row.supplier_id,
-                        fabricType: row.fabric_type || "Single Jersey Cotton",
-                        color: row.color || "Indigo",
-                        rolls: Number(row.total_rolls || 5),
+                        fabricType: row.fabric_type || "—",
+                        color: row.color || "—",
+                        rolls: Number(row.total_rolls || 0),
                         samplingStage: row.sampling_stage || "Initial",
                         lifecycle,
                         quality,
-                        notes: row.notes || "Standard lot delivery.",
-                        value: Math.round((quality || 80) * 180),
-                        scope: idx % 2 === 0 ? "Fabric" : "Label",
+                        notes: row.notes || "No inspector note recorded.",
+                        // Recorded lot value: volume x the supplier's contract
+                        // unit price. It used to be (quality || 80) * 180.
+                        value: row.lot_value != null ? Number(row.lot_value) : null,
+                        onTime: row.on_time,
+                        promised: row.promised_date || null,
+                        received: row.received_date || null,
+                        scope: row.scope,
                     };
                 });
                 setShipments(parsed);
@@ -96,7 +116,7 @@ export default function ShipmentAnalytics() {
         const totalRolls = scopedShipments.reduce((acc, s) => acc + s.rolls, 0);
 
         const qualityScores = scopedShipments.filter((s) => s.quality != null).map((s) => s.quality);
-        const avgScore = qualityScores.length ? (qualityScores.reduce((a, b) => a + b, 0) / qualityScores.length).toFixed(1) : "85.0";
+        const avgScore = qualityScores.length ? (qualityScores.reduce((a, b) => a + b, 0) / qualityScores.length).toFixed(1) : null;
 
         // Fabric type counts
         const fabricCounts = {};
@@ -146,8 +166,8 @@ export default function ShipmentAnalytics() {
                 </div>
                 <div className="kpi-card">
                     <span>Average Lot Quality</span>
-                    <strong>{stats.avgScore}<small style={{ fontSize: "1rem" }}>/100</small></strong>
-                    <small>Target standard: 85.0+</small>
+                    <strong>{stats.avgScore ?? "—"}<small style={{ fontSize: "1rem" }}>/100</small></strong>
+                    <small>{target != null ? `Target standard: ${target}+` : "No target on record"}</small>
                 </div>
             </section>
 
@@ -304,12 +324,12 @@ export default function ShipmentAnalytics() {
                                         <b>{selectedShipment.quality != null ? `${selectedShipment.quality}/100` : "Pending"}</b>
                                     </div>
                                     <div>
-                                        <span>Estimated Lot Value</span>
-                                        <b>${selectedShipment.value.toLocaleString()}</b>
+                                        <span>Lot Value</span>
+                                        <b>{selectedShipment.value != null ? `$${Math.round(selectedShipment.value).toLocaleString()}` : "—"}</b>
                                     </div>
                                     <div>
-                                        <span>Status</span>
-                                        <b>{selectedShipment.lifecycle}</b>
+                                        <span>Delivery</span>
+                                        <b>{selectedShipment.onTime == null ? "—" : selectedShipment.onTime ? "On time" : "Late"}</b>
                                     </div>
                                 </div>
 

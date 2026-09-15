@@ -6,43 +6,47 @@ import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
 import { TrendChart } from "../components/Visuals";
-import { trendData } from "../data/operationsData";
-
-const SCOPE_CONFIG = {
-    All: { quality: 94.2, manual: 18, baseline: 78.0, trend: trendData },
-    Fabric: { quality: 94.2, manual: 18, baseline: 78.0, trend: trendData },
-    Label: { quality: 96.5, manual: 12, baseline: 82.0, trend: [80, 83, 84, 86, 87, 89, 90, 92, 93, 94, 95, 96] },
-};
 
 export default function QualityRoiAnalytics() {
     const location = useLocation();
     const [searchParams, setSearchParams] = useSearchParams();
     const [activeTab, setActiveTab] = useState("roi"); // "roi" | "trends" | "copq"
-    const scope = searchParams.get("scope") || "All";
-    const [rollsPerMonth, setRollsPerMonth] = useState(180);
-    const [manualMinutesPerRoll, setManualMinutesPerRoll] = useState(18);
-    const [hourlyLaborCost, setHourlyLaborCost] = useState(25);
-    const [rejectionCostPerRoll, setRejectionCostPerRoll] = useState(320);
-    const [liveQuality, setLiveQuality] = useState(null);
-    const [liveTrend, setLiveTrend] = useState(null);
+    const scope = searchParams.get("scope") || "Fabric";
+    const period = searchParams.get("period") || "This month";
+
+    const [stats, setStats] = useState(null);
+    const [model, setModel] = useState(null);
+    const [copq, setCopq] = useState(null);
+
+    // Simulator inputs. They START at the stored values and the measured
+    // volume, then the user is free to move them. Nothing here has a literal
+    // default any more - null means "not loaded yet".
+    const [rollsPerMonth, setRollsPerMonth] = useState(null);
+    const [manualMinutesPerRoll, setManualMinutesPerRoll] = useState(null);
+    const [aiMinutesPerRoll, setAiMinutesPerRoll] = useState(null);
+    const [hourlyLaborCost, setHourlyLaborCost] = useState(null);
+    const [rejectionCostPerRoll, setRejectionCostPerRoll] = useState(null);
 
     useEffect(() => {
-        axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope, period: searchParams.get("period") || "This month" } })
-            .then(({ data }) => {
-                setRollsPerMonth(Number(data.total_inspections || 0));
-                setManualMinutesPerRoll(Number(data.manual_minutes_per_item || 18));
-                setLiveQuality(data.avg_quality != null ? Number(data.avg_quality) : null);
-                setLiveTrend(Array.isArray(data.trend) && data.trend.length ? data.trend.map(Number) : null);
-            })
-            .catch(() => {});
-    }, [scope, searchParams]);
+        Promise.all([
+            axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope, period } }),
+            axios.get(`${API_BASE_URL}/api/economics/model`, { params: { scope, period } }),
+            axios.get(`${API_BASE_URL}/api/economics/copq`, { params: { scope, period } }),
+        ])
+            .then(([statsRes, modelRes, copqRes]) => {
+                setStats(statsRes.data);
+                setModel(modelRes.data);
+                setCopq(copqRes.data);
 
-    // Same quality metric as the dashboard: current = latest month, trend = monthly series.
-    const config = SCOPE_CONFIG[scope];
-    const quality = liveQuality ?? config.quality;
-    const trend = liveTrend && liveTrend.length ? liveTrend : config.trend;
-    const baseline = trend[0] ?? config.baseline;
-    const gain = Math.max(0, quality - baseline);
+                const parameters = modelRes.data.parameters;
+                setRollsPerMonth(Math.round(modelRes.data.volumes.inspections_per_month));
+                setManualMinutesPerRoll(Number(parameters.manual_minutes_per_unit));
+                setAiMinutesPerRoll(Number(parameters.ai_minutes_per_unit));
+                setHourlyLaborCost(Number(parameters.hourly_labor_cost));
+                setRejectionCostPerRoll(Number(parameters.reject_cost_per_unit));
+            })
+            .catch(() => { setStats(null); setModel(null); setCopq(null); });
+    }, [scope, period]);
 
     const changeScope = (next) => {
         setSearchParams((prev) => {
@@ -50,7 +54,18 @@ export default function QualityRoiAnalytics() {
             params.set("scope", next);
             return params;
         });
-        setManualMinutesPerRoll(SCOPE_CONFIG[next].manual);
+    };
+
+    // Period was only ever readable from the URL, so whatever the dashboard
+    // linked in with was fixed for the life of the page. Every figure here is
+    // period-scoped, and the COPQ tab in particular is empty in a window with
+    // no rejects, which left no way to reach the data.
+    const changePeriod = (next) => {
+        setSearchParams((prev) => {
+            const params = new URLSearchParams(prev);
+            params.set("period", next);
+            return params;
+        });
     };
 
     useEffect(() => {
@@ -58,21 +73,47 @@ export default function QualityRoiAnalytics() {
         else if (location.pathname.includes("roi")) setActiveTab("roi");
     }, [location.pathname]);
 
-    // Dynamic calculations based on simulator sliders
-    const aiMinutesPerRoll = 4;
-    const minutesSavedPerRoll = Math.max(0, manualMinutesPerRoll - aiMinutesPerRoll);
-    const hoursSavedPerMonth = Math.round((rollsPerMonth * minutesSavedPerRoll) / 60);
-    const laborSavingsPerMonth = Math.round(hoursSavedPerMonth * hourlyLaborCost);
+    // Same quality metric as the dashboard: current average and monthly series.
+    const quality = stats?.avg_quality ?? null;
+    const trend = stats?.trend || [];
+    const trendMonths = stats?.trend_months || [];
+    const target = stats?.quality_target ?? null;
+    // Baseline is the first month actually on record, not an assumed number.
+    const baseline = trend.length ? trend[0] : null;
+    const gain = quality != null && baseline != null ? Math.max(0, quality - baseline) : null;
+    const currency = model?.currency || "USD";
+    const money = (value) => (value == null ? "—" : `$${Math.round(Number(value)).toLocaleString()}`);
+
+    // Live recomputation as the sliders move. The formulas match
+    // /api/economics/model exactly, so the page agrees with Reports until the
+    // user deliberately changes an input.
+    const ready = model && rollsPerMonth != null;
+    const minutesSavedPerRoll = ready ? Math.max(0, manualMinutesPerRoll - aiMinutesPerRoll) : 0;
+    const hoursSavedPerMonth = ready ? Math.round((rollsPerMonth * minutesSavedPerRoll) / 60) : 0;
+    const laborSavingsPerMonth = ready ? Math.round(hoursSavedPerMonth * hourlyLaborCost) : 0;
     const annualLaborSavings = laborSavingsPerMonth * 12;
 
-    // Defect avoidance & scrap savings
-    const estimatedRejectsAvoided = Math.round(rollsPerMonth * 0.045);
+    // Rejects avoided uses this scope's MEASURED reject rate and the stored
+    // manual miss rate, instead of a flat 4.5% guess.
+    const rejectRate = ready ? Number(model.volumes.reject_rate_pct) / 100 : 0;
+    const missRate = ready ? Math.max(0, 100 - Number(model.parameters.manual_detection_rate)) / 100 : 0;
+    const estimatedRejectsAvoided = Math.round(rollsPerMonth * rejectRate * missRate);
     const annualScrapSavings = estimatedRejectsAvoided * rejectionCostPerRoll * 12;
     const totalAnnualSavings = annualLaborSavings + annualScrapSavings;
 
-    // Payback calculation (estimated $18,000 initial system setup)
-    const setupCost = 18000;
-    const paybackMonths = totalAnnualSavings > 0 ? (setupCost / (totalAnnualSavings / 12)).toFixed(1) : "N/A";
+    // Setup cost is the recorded total of system_investments.
+    const setupCost = model?.investment?.total ?? 0;
+    const paybackMonths = totalAnnualSavings > 0 && setupCost > 0
+        ? (setupCost / (totalAnnualSavings / 12)).toFixed(1)
+        : "N/A";
+
+    if (!ready) {
+        return (
+            <OperationsShell eyebrow="Quality trends & economic impact model" title="Quality trends, AI value creation & ROI simulator.">
+                <section className="workspace-card"><p>Loading the economic model from the inspection and cost tables…</p></section>
+            </OperationsShell>
+        );
+    }
 
     return (
         <OperationsShell
@@ -90,7 +131,7 @@ export default function QualityRoiAnalytics() {
                 <div className="kpi-card">
                     <span>Labor Hours Saved / Mo</span>
                     <strong className="positive">{hoursSavedPerMonth} hrs</strong>
-                    <small>4 min/roll vs {manualMinutesPerRoll} min manual</small>
+                    <small>{aiMinutesPerRoll} min/unit vs {manualMinutesPerRoll} min manual</small>
                 </div>
                 <div className="kpi-card">
                     <span>Projected Annual Savings</span>
@@ -100,12 +141,12 @@ export default function QualityRoiAnalytics() {
                 <div className="kpi-card">
                     <span>System Payback Period</span>
                     <strong>{paybackMonths} Mo</strong>
-                    <small>Based on ${setupCost.toLocaleString()} setup</small>
+                    <small>Based on {money(setupCost)} recorded investment</small>
                 </div>
                 <div className="kpi-card">
                     <span>Accepted Quality Score</span>
                     <strong>{quality}<small style={{ fontSize: "1rem" }}>/100</small></strong>
-                    <small className="positive">+{gain.toFixed(1)} pts above manual baseline</small>
+                    <small className="positive">{gain != null ? `+${gain.toFixed(1)} pts since ${trendMonths[0] || "the first month on record"}` : "No history yet"}</small>
                 </div>
             </section>
 
@@ -125,6 +166,15 @@ export default function QualityRoiAnalytics() {
                 </div>
                 <span className="section-label" style={{ marginLeft: "auto", marginRight: "6px" }}>Scope:</span>
                 <ScopeToggle value={scope} onChange={changeScope} />
+                <label className="select-control" style={{ marginLeft: "10px" }}>
+                    Period
+                    <select value={period} onChange={(event) => changePeriod(event.target.value)}>
+                        <option>This week</option>
+                        <option>This month</option>
+                        <option>This quarter</option>
+                        <option>This year</option>
+                    </select>
+                </label>
             </section>
 
             {/* Tab 1: Interactive ROI Simulator */}
@@ -142,8 +192,8 @@ export default function QualityRoiAnalytics() {
                         <div style={{ display: "grid", gap: "16px", marginTop: "14px" }}>
                             <div>
                                 <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", fontSize: "0.76rem" }}>
-                                    <span>Monthly Inbound Rolls</span>
-                                    <b>{rollsPerMonth} Rolls</b>
+                                    <span>Monthly Inbound Units</span>
+                                    <b>{rollsPerMonth} Units</b>
                                 </div>
                                 <input
                                     type="range"
@@ -158,7 +208,7 @@ export default function QualityRoiAnalytics() {
 
                             <div>
                                 <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", fontSize: "0.76rem" }}>
-                                    <span>Manual Inspection Time per Roll</span>
+                                    <span>Manual Inspection Time per Unit</span>
                                     <b>{manualMinutesPerRoll} Minutes</b>
                                 </div>
                                 <input
@@ -191,7 +241,7 @@ export default function QualityRoiAnalytics() {
                             <div>
                                 <div style={{ display: "flex", justifySelf: "stretch", justifyContent: "space-between", fontSize: "0.76rem" }}>
                                     <span>Cost of Escaped Flaw / Rejected Lot</span>
-                                    <b>${rejectionCostPerRoll} / roll</b>
+                                    <b>${rejectionCostPerRoll} / unit</b>
                                 </div>
                                 <input
                                     type="range"
@@ -241,11 +291,11 @@ export default function QualityRoiAnalytics() {
                             <div className="roi-compare" style={{ marginTop: "20px" }}>
                                 <div>
                                     <span>Manual Process</span>
-                                    <b>{manualMinutesPerRoll} min / roll</b>
+                                    <b>{manualMinutesPerRoll} min / unit</b>
                                 </div>
                                 <div>
                                     <span>AI Detection</span>
-                                    <b style={{ color: "#b8e6d4" }}>4 min / roll</b>
+                                    <b style={{ color: "#b8e6d4" }}>{aiMinutesPerRoll} min / unit</b>
                                 </div>
                             </div>
 
@@ -261,7 +311,7 @@ export default function QualityRoiAnalytics() {
                         </div>
 
                         <p style={{ marginTop: "20px" }}>
-                            Automated camera inspection delivers <b>4.5x faster clearance</b> with consistent four-point grading accuracy.
+                            Automated inspection delivers <b>{(manualMinutesPerRoll / aiMinutesPerRoll).toFixed(1)}x faster clearance</b> with consistent four-point grading.
                         </p>
                     </article>
                 </section>
@@ -276,13 +326,13 @@ export default function QualityRoiAnalytics() {
                                 <span className="section-label">Quality Score Horizon</span>
                                 <h2>Monthly Accepted Quality Performance</h2>
                             </div>
-                            <span className="trend-chip positive">{gain >= 1 ? "Consistent Growth" : "Stable Quality"}</span>
+                            <span className="trend-chip positive">{(gain ?? 0) >= 1 ? "Consistent Growth" : "Stable Quality"}</span>
                         </div>
-                        <TrendChart values={trend} label="Accepted quality score trajectory" />
+                        <TrendChart values={trend} months={trendMonths} label="Accepted quality score trajectory" />
                         <div className="chart-legend" style={{ marginTop: "16px" }}>
                             <span><i className="legend-dot" /> Live Quality Score: <b>{quality}</b></span>
-                            <span>Target Minimum: <b>92.0</b></span>
-                            <span>Historical Manual Baseline: <b>{baseline}</b></span>
+                            <span>Target Minimum: <b>{target ?? "—"}</b></span>
+                            <span>First Month On Record: <b>{baseline ?? "—"}</b></span>
                         </div>
                     </article>
 
@@ -295,69 +345,55 @@ export default function QualityRoiAnalytics() {
                         </div>
                         <div style={{ display: "grid", gap: "12px" }}>
                             <div style={{ padding: "10px", background: "#f8faf7", borderRadius: "8px" }}>
-                                <strong>+{gain.toFixed(1)} Points Overall Quality</strong>
-                                <p style={{ fontSize: "0.72rem", marginTop: "2px" }}>From initial {baseline} baseline to {quality} current average score.</p>
+                                <strong>{gain != null ? `+${gain.toFixed(1)}` : "—"} Points Overall Quality</strong>
+                                <p style={{ fontSize: "0.72rem", marginTop: "2px" }}>From {baseline ?? "—"} in {trendMonths[0] || "the first month"} to {quality ?? "—"} now.</p>
                             </div>
                             <div style={{ padding: "10px", background: "#f8faf7", borderRadius: "8px" }}>
-                                <strong>-68% Defect Escape Rate</strong>
-                                <p style={{ fontSize: "0.72rem", marginTop: "2px" }}>Pre-cutting flaw detections prevented garment assembly rejects.</p>
+                                <strong>{model.volumes.defects.toLocaleString()} Defects Caught</strong>
+                                <p style={{ fontSize: "0.72rem", marginTop: "2px" }}>{model.volumes.defects_per_inspection} per inspection across {model.volumes.inspections.toLocaleString()} units, before cutting.</p>
                             </div>
                             <div style={{ padding: "10px", background: "#f8faf7", borderRadius: "8px" }}>
-                                <strong>100% Digital Audit Trail</strong>
-                                <p style={{ fontSize: "0.72rem", marginTop: "2px" }}>Every roll image with bounding-box tags catalogued in PostgreSQL.</p>
+                                <strong>{model.volumes.rejects.toLocaleString()} Lots Held</strong>
+                                <p style={{ fontSize: "0.72rem", marginTop: "2px" }}>{model.volumes.reject_rate_pct}% of inspected units were quarantined rather than shipped.</p>
                             </div>
                         </div>
                     </article>
                 </section>
             )}
 
-            {/* Tab 3: COPQ Breakdown */}
+            {/* Tab 3: COPQ Breakdown - recorded loss events, not a fixed split */}
             {activeTab === "copq" && (
                 <section className="dashboard-grid dashboard-grid--two">
                     <article className="workspace-card">
                         <div className="card-heading">
                             <div>
                                 <span className="section-label">Cost of Poor Quality Breakdown</span>
-                                <h2>COPQ Categories & Loss Avoidance</h2>
+                                <h2>COPQ Categories &amp; Loss Avoidance</h2>
                             </div>
+                            <span className="trend-chip">{money(copq?.total)} recorded</span>
                         </div>
                         <div style={{ display: "grid", gap: "14px", marginTop: "12px" }}>
-                            <div>
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.76rem" }}>
-                                    <span>Material Scrap / Unusable Yardage</span>
-                                    <b>42% ($14,200/yr)</b>
+                            {(copq?.categories || []).map((row) => (
+                                <div key={row.category}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.76rem" }}>
+                                        <span>{row.category}</span>
+                                        <b>{row.percent}% ({money(row.amount)})</b>
+                                    </div>
+                                    <div style={{ height: "7px", background: "#edf1ec", borderRadius: "99px", marginTop: "4px", overflow: "hidden" }}>
+                                        <div style={{ width: `${row.percent}%`, height: "100%", background: "var(--accent)" }} />
+                                    </div>
+                                    <small style={{ color: "var(--muted)", fontSize: "0.62rem" }}>
+                                        {row.events} events recorded against inspections in this period
+                                    </small>
                                 </div>
-                                <div style={{ height: "7px", background: "#edf1ec", borderRadius: "99px", marginTop: "4px", overflow: "hidden" }}>
-                                    <div style={{ width: "42%", height: "100%", background: "var(--danger)" }} />
-                                </div>
-                            </div>
-                            <div>
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.76rem" }}>
-                                    <span>Rework & Manual Re-Inspection</span>
-                                    <b>28% ($9,400/yr)</b>
-                                </div>
-                                <div style={{ height: "7px", background: "#edf1ec", borderRadius: "99px", marginTop: "4px", overflow: "hidden" }}>
-                                    <div style={{ width: "28%", height: "100%", background: "#e5a43d" }} />
-                                </div>
-                            </div>
-                            <div>
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.76rem" }}>
-                                    <span>Production Downtime & Delays</span>
-                                    <b>19% ($6,400/yr)</b>
-                                </div>
-                                <div style={{ height: "7px", background: "#edf1ec", borderRadius: "99px", marginTop: "4px", overflow: "hidden" }}>
-                                    <div style={{ width: "19%", height: "100%", background: "var(--accent)" }} />
-                                </div>
-                            </div>
-                            <div>
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.76rem" }}>
-                                    <span>Customer Chargebacks / Claims</span>
-                                    <b>11% ($3,800/yr)</b>
-                                </div>
-                                <div style={{ height: "7px", background: "#edf1ec", borderRadius: "99px", marginTop: "4px", overflow: "hidden" }}>
-                                    <div style={{ width: "11%", height: "100%", background: "#8bb769" }} />
-                                </div>
-                            </div>
+                            ))}
+                            {!copq?.categories?.length && (
+                                <p style={{ opacity: 0.7 }}>
+                                    No loss events recorded for {scope} in {period.toLowerCase()} — nothing was
+                                    rejected, so there is no cost to attribute.
+                                    {period !== "This year" && " Widen the period above to see earlier losses."}
+                                </p>
+                            )}
                         </div>
                     </article>
 
@@ -369,12 +405,20 @@ export default function QualityRoiAnalytics() {
                             </div>
                         </div>
                         <p style={{ fontSize: "0.82rem", lineHeight: "1.6" }}>
-                            By catching flaws at the <b>fabric roll stage</b> rather than downstream after cutting and sewing, the Cost of Poor Quality decreases exponentially.
+                            Catching flaws at the <b>incoming inspection stage</b> keeps them out of the
+                            downstream categories above. In this period {model.volumes.rejects.toLocaleString()} of
+                            {" "}{model.volumes.inspections.toLocaleString()} units ({model.volumes.reject_rate_pct}%)
+                            were held before release.
                         </p>
                         <div style={{ marginTop: "16px", padding: "14px", background: "#f5f9f6", borderRadius: "10px", border: "1px solid #d8e8dc" }}>
-                            <strong style={{ color: "var(--accent-dark)", fontSize: "0.85rem" }}>1-10-100 Rule in Textile Quality</strong>
+                            <strong style={{ color: "var(--accent-dark)", fontSize: "0.85rem" }}>Average recorded loss per held unit</strong>
                             <p style={{ fontSize: "0.75rem", marginTop: "6px" }}>
-                                Fixing a flaw at incoming roll inspection costs <b>$1</b>; catching it at garment assembly costs <b>$10</b>; resolving it after customer delivery costs <b>$100</b>.
+                                {model.volumes.rejects > 0
+                                    ? <>The {money(copq?.total)} above spreads across {model.volumes.rejects.toLocaleString()} held
+                                       units, or <b>{money((copq?.total || 0) / model.volumes.rejects)}</b> each. The stored
+                                       assumption for an escaped flaw is <b>{money(model.parameters.reject_cost_per_unit)}</b>.</>
+                                    : <>No units were held in {period.toLowerCase()}, so no loss has been attributed.
+                                       {period !== "This year" && " Widen the period above to see earlier losses."}</>}
                             </p>
                         </div>
                     </article>

@@ -8,11 +8,14 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 
 from app.pipeline import LabelInspector, StructuralGate
 from app.db import get_db
+from app.quality import canonical_verdict
 
 
 router = APIRouter(
@@ -21,8 +24,10 @@ router = APIRouter(
 )
 
 
-def ensure_label_table(cur):
-    cur.execute("""CREATE TABLE IF NOT EXISTS label_inspections (label_inspection_id SERIAL PRIMARY KEY, report_id UUID UNIQUE NOT NULL, verdict VARCHAR(50) NOT NULL, ssim_score NUMERIC(5,4), hotspot_count INT NOT NULL DEFAULT 0, inspected_at TIMESTAMP DEFAULT NOW())""")
+# NOTE: label_inspections is owned by bulk_schema.sql. This module used to
+# CREATE TABLE IF NOT EXISTS a reduced six-column version of it, which would
+# silently produce a table missing sample_id, reference_template_id,
+# inspection_mode, confidence_score and status if it ever ran first.
 
 
 # --------------------------------------------------
@@ -401,8 +406,15 @@ def create_result(report):
 @router.post("/inspect")
 async def inspect_label(
     golden: UploadFile = File(...),
-    candidate: UploadFile = File(...)
+    candidate: UploadFile = File(...),
+    sample_id: Optional[int] = Form(None),
 ):
+    """Compare a candidate label against a golden reference.
+
+    sample_id is optional but recommended: without it the inspection cannot be
+    traced back to a shipment or supplier, and it shows in the queue as an
+    ad-hoc capture with no supplier attached.
+    """
 
     try:
 
@@ -520,9 +532,29 @@ async def inspect_label(
         conn = get_db()
         try:
             with conn.cursor() as cur:
-                ensure_label_table(cur)
+
                 gate2 = result.get("gate2") or {}
-                cur.execute("INSERT INTO label_inspections (report_id, verdict, ssim_score, hotspot_count) VALUES (%s, %s, %s, %s)", (report_id, result["verdict"], gate2.get("ssim_score"), gate2.get("hotspot_count", 0)))
+                # Store the canonical verdict; the gate that produced it goes in
+                # verdict_detail, so REJECT_GATE2 is still recoverable without
+                # every reader having to know about gate names.
+                raw_verdict = result["verdict"]
+                cur.execute(
+                    """
+                    INSERT INTO label_inspections
+                      (report_id, sample_id, inspection_mode, verdict, verdict_detail,
+                       ssim_score, hotspot_count, status)
+                    VALUES (%s, %s, 'Deterministic', %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        report_id,
+                        sample_id,
+                        canonical_verdict(raw_verdict),
+                        raw_verdict if raw_verdict != canonical_verdict(raw_verdict) else None,
+                        gate2.get("ssim_score"),
+                        gate2.get("hotspot_count", 0),
+                        "Completed",
+                    ),
+                )
             conn.commit()
         finally:
             conn.close()

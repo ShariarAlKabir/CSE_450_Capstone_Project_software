@@ -6,14 +6,17 @@ import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
 
-const SEVERITY_INFO = {
-    "Hole": { severity: 4, desc: "Critical weave opening / tear" },
-    "Yarn missing": { severity: 4, desc: "Structural warp/weft omission" },
-    "Oil Spot": { severity: 3, desc: "Liquid or grease surface contamination" },
-    "Contamination": { severity: 3, desc: "Foreign fiber or color fly" },
-    "Needle mark": { severity: 2, desc: "Knitting needle alignment flaw" },
-    "Setup": { severity: 2, desc: "Machine startup tension irregularity" },
-    "Miss loop": { severity: 1, desc: "Minor stitch loop defect" },
+// Human-readable descriptions only. The severity itself is whatever the
+// database recorded for that defect class, not a second copy of the mapping
+// that could drift from app/quality.py.
+const DEFECT_DESCRIPTIONS = {
+    "Hole": "Critical weave opening / tear",
+    "Yarn missing": "Structural warp/weft omission",
+    "Oil Spot": "Liquid or grease surface contamination",
+    "Contamination": "Foreign fiber or color fly",
+    "Needle mark": "Knitting needle alignment flaw",
+    "Setup": "Machine startup tension irregularity",
+    "Miss loop": "Minor stitch loop defect",
 };
 
 export default function InspectionAnalytics() {
@@ -23,34 +26,41 @@ export default function InspectionAnalytics() {
     const [gradeFilter, setGradeFilter] = useState("All");
     const [selectedDefectType, setSelectedDefectType] = useState("All");
     const [searchQuery, setSearchQuery] = useState("");
-    const [scope, setScope] = useState("All");
+    const [scope, setScope] = useState("Fabric");
+    const [detection, setDetection] = useState(null);
+    const [severityByType, setSeverityByType] = useState({});
+    const [policy, setPolicy] = useState(null);
 
     useEffect(() => {
         Promise.all([
             axios.get(`${API_BASE_URL}/api/fabric/inspections`),
-            axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`),
+            axios.get(`${API_BASE_URL}/api/label/inspections`),
+            axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope, period: "This year" } }),
+            axios.get(`${API_BASE_URL}/api/economics/detection`, { params: { scope, period: "This year" } }),
+            axios.get(`${API_BASE_URL}/api/fabric/defect-severities`, { params: { scope } }),
+            axios.get(`${API_BASE_URL}/api/fabric/grading-policy`),
         ])
-            .then(([inspRes, statRes]) => {
-                setInspections(inspRes.data?.inspections || []);
+            .then(([fabricRes, labelRes, statRes, detectionRes, severityRes, policyRes]) => {
+                const fabric = (fabricRes.data?.inspections || []).map((item) => ({ ...item, scope: "Fabric" }));
+                const label = (labelRes.data?.inspections || []).map((item) => ({ ...item, scope: "Label" }));
+                setInspections([...fabric, ...label]);
                 setStats(statRes.data || null);
+                setDetection(detectionRes.data || null);
+                setSeverityByType(severityRes.data?.severities || {});
+                setPolicy(policyRes.data || null);
             })
             .catch(() => {
                 setInspections([]);
                 setStats(null);
+                setDetection(null);
+                setSeverityByType({});
+                setPolicy(null);
             });
-    }, []);
+    }, [scope]);
 
-    const defectBreakdown = useMemo(() => {
-        return stats?.defect_breakdown || [
-            { label: "Needle mark", value: 18 },
-            { label: "Setup", value: 18 },
-            { label: "Contamination", value: 17 },
-            { label: "Oil Spot", value: 17 },
-            { label: "Yarn missing", value: 17 },
-            { label: "Miss loop", value: 17 },
-            { label: "Hole", value: 16 },
-        ];
-    }, [stats]);
+    // No fallback list: if the database returns nothing, the page says so
+    // rather than drawing a plausible-looking distribution.
+    const defectBreakdown = useMemo(() => stats?.defect_breakdown || [], [stats]);
 
     const totalDefectsCount = useMemo(() => {
         return defectBreakdown.reduce((acc, d) => acc + d.value, 0);
@@ -107,12 +117,12 @@ export default function InspectionAnalytics() {
                 <div className="kpi-card">
                     <span>Total Inspected Rolls</span>
                     <strong>{scope === "All" ? (stats?.total_inspections ?? scopedInspections.length) : scopedInspections.length}</strong>
-                    <small>100% camera scanned</small>
+                    <small>{scope === "Label" ? "label samples" : "fabric rolls"} with a stored inspection record</small>
                 </div>
                 <div className="kpi-card">
                     <span>Defects Catalogued</span>
                     <strong>{totalDefectsCount}</strong>
-                    <small>Across 7 distinct defect classes</small>
+                    <small>Across {defectBreakdown.length} distinct defect {defectBreakdown.length === 1 ? "class" : "classes"}</small>
                 </div>
                 <div className="kpi-card">
                     <span>Grade A Clearance Rate</span>
@@ -121,8 +131,12 @@ export default function InspectionAnalytics() {
                 </div>
                 <div className="kpi-card">
                     <span>Average Model Confidence</span>
-                    <strong>96.4%</strong>
-                    <small>High certainty routing</small>
+                    <strong>{detection?.ai_confidence_pct != null ? `${detection.ai_confidence_pct}%` : "—"}</strong>
+                    <small>
+                        {detection?.sample_size
+                            ? `Mean over ${Number(detection.sample_size).toLocaleString()} detections`
+                            : "No detections on record"}
+                    </small>
                 </div>
             </section>
 
@@ -141,7 +155,7 @@ export default function InspectionAnalytics() {
                     <div style={{ display: "grid", gap: "12px", marginTop: "14px" }}>
                         {defectBreakdown.map((item) => {
                             const pct = totalDefectsCount > 0 ? Math.round((item.value / totalDefectsCount) * 100) : 0;
-                            const sev = SEVERITY_INFO[item.label]?.severity || 1;
+                            const sev = severityByType[item.label] ?? 1;
                             const sevColor = sev === 4 ? "var(--danger)" : sev === 3 ? "#e5a43d" : "var(--accent)";
 
                             return (
@@ -162,7 +176,7 @@ export default function InspectionAnalytics() {
                                     <div>
                                         <strong style={{ fontSize: "0.78rem" }}>{item.label}</strong>
                                         <small style={{ display: "block", color: "var(--muted)", fontSize: "0.62rem" }}>
-                                            {SEVERITY_INFO[item.label]?.desc}
+                                            {DEFECT_DESCRIPTIONS[item.label] || "Detected defect class"}
                                         </small>
                                     </div>
                                     <div>
@@ -188,6 +202,9 @@ export default function InspectionAnalytics() {
                                 </div>
                             );
                         })}
+                        {!defectBreakdown.length && (
+                            <p style={{ opacity: 0.7 }}>No defects recorded for this scope and period.</p>
+                        )}
                     </div>
                 </article>
 
@@ -267,20 +284,15 @@ export default function InspectionAnalytics() {
 
                     {/* Confidence Routing Rule Guide */}
                     <div style={{ paddingTop: "14px", borderTop: "1px solid var(--line)" }}>
-                        <span className="section-label">Confidence Policy Router</span>
+                        <span className="section-label">Grading Policy</span>
+                        <p style={{ fontSize: "0.7rem", color: "var(--muted)", marginTop: "4px" }}>{policy?.description}</p>
                         <div className="confidence-rules" style={{ marginTop: "8px" }}>
-                            <div>
-                                <b>95%+</b>
-                                <span>Auto-cleared (Grade A high certainty)</span>
-                            </div>
-                            <div>
-                                <b>80–94%</b>
-                                <span>Inspector verification before release</span>
-                            </div>
-                            <div>
-                                <b>&lt;80%</b>
-                                <span>Quarantined for manager sign-off</span>
-                            </div>
+                            {(policy?.bands || []).map((band) => (
+                                <div key={band.grade}>
+                                    <b>{band.grade}</b>
+                                    <span>{band.label} — {band.routing}</span>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </article>
@@ -320,7 +332,7 @@ export default function InspectionAnalytics() {
                         <div className="inspection-queue__row" key={i.id}>
                             <div>
                                 <strong>{i.id} · {i.roll}</strong>
-                                <small>{i.supplier} · {i.defects} detected defects · {i.confidence}% AI confidence · {i.time}</small>
+                                <small>{i.supplier} · {i.defects} detected defects · {i.confidence != null ? `${i.confidence}% AI confidence` : "no detections"} · {i.time}</small>
                             </div>
                             <span className={`table-status table-status--${i.status.toLowerCase().replace(" ", "-")}`}>
                                 {i.status}
@@ -328,7 +340,7 @@ export default function InspectionAnalytics() {
                             <span className="inspection-grade" style={{ color: i.grade === "A" ? "var(--success)" : i.grade === "B" ? "#8bb769" : "var(--danger)" }}>
                                 {i.grade}
                             </span>
-                            <Link to="/fabric-inspection" className="text-link" style={{ fontSize: "0.7rem" }}>
+                            <Link to={`/inspections/${i.scope === "Label" ? i.id : i.id.replace("IN-", "")}`} className="text-link" style={{ fontSize: "0.7rem" }}>
                                 View Evidence →
                             </Link>
                         </div>

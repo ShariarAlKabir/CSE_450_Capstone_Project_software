@@ -1,7 +1,8 @@
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import axios from "axios";
 
-import { shipments, suppliers } from "../data/operationsData";
+import { API_BASE_URL } from "../config.js";
 
 const navigation = [
     { to: "/", label: "Dashboard", mark: "01" },
@@ -28,17 +29,75 @@ function OperationsShell({ title, eyebrow, children, actions }) {
     const [menuOpen, setMenuOpen] = useState(false);
     const [pagesOpen, setPagesOpen] = useState(false);
     const location = useLocation();
-    const normalizedQuery = query.trim().toLowerCase();
-    const searchResults = normalizedQuery
-        ? [
-              ...suppliers
-                  .filter((supplier) => supplier.name.toLowerCase().includes(normalizedQuery))
-                  .map((supplier) => ({ label: supplier.name, meta: "Supplier", to: `/suppliers?selected=${supplier.id}` })),
-              ...shipments
-                  .filter((shipment) => `${shipment.id} ${shipment.supplier} ${shipment.fabric}`.toLowerCase().includes(normalizedQuery))
-                  .map((shipment) => ({ label: shipment.id, meta: shipment.supplier, to: `/shipments?selected=${shipment.id}` })),
-          ].slice(0, 5)
-        : [];
+    const [searchResults, setSearchResults] = useState([]);
+    const [user, setUser] = useState(null);
+    const [alertCount, setAlertCount] = useState(null);
+
+    // The signed-in user and the alert badge both come from the database, so
+    // the badge always equals the number of alerts the notifications page will
+    // list, and the sidebar name matches the account page.
+    useEffect(() => {
+        axios.get(`${API_BASE_URL}/api/workspace/user`)
+            .then((response) => setUser(response.data))
+            .catch(() => setUser(null));
+
+        axios.get(`${API_BASE_URL}/api/workspace/alerts`, { params: { scope: "All" } })
+            .then((response) => setAlertCount(response.data?.total ?? 0))
+            .catch(() => setAlertCount(null));
+    }, []);
+
+    useEffect(() => {
+        const normalizedQuery = query.trim().toLowerCase();
+        if (normalizedQuery.length < 2) {
+            setSearchResults([]);
+            return undefined;
+        }
+
+        let cancelled = false;
+        const handle = window.setTimeout(() => {
+            const supplierId = (prefix, id) => `${prefix}-${String(id).padStart(2, "0")}`;
+            Promise.all([
+                axios.get(`${API_BASE_URL}/api/fabric/suppliers`),
+                axios.get(`${API_BASE_URL}/api/label/suppliers`),
+                axios.get(`${API_BASE_URL}/api/fabric/shipments`),
+                axios.get(`${API_BASE_URL}/api/label/shipments`),
+            ])
+                .then(([fabricSuppliers, labelSuppliers, fabricShipments, labelShipments]) => {
+                    if (cancelled) return;
+                    const results = [];
+                    (fabricSuppliers.data?.suppliers || []).forEach((supplier) => {
+                        if (supplier.name.toLowerCase().includes(normalizedQuery)) {
+                            results.push({ label: supplier.name, meta: "Fabric supplier", to: `/suppliers?selected=${supplierId("sup", supplier.supplier_id)}` });
+                        }
+                    });
+                    (labelSuppliers.data?.suppliers || []).forEach((supplier) => {
+                        if (supplier.name.toLowerCase().includes(normalizedQuery)) {
+                            results.push({ label: supplier.name, meta: "Label supplier", to: `/suppliers?selected=${supplierId("lbl", supplier.supplier_id)}` });
+                        }
+                    });
+                    (fabricShipments.data?.shipments || []).forEach((shipment) => {
+                        if (String(shipment.shipment_code).toLowerCase().includes(normalizedQuery)) {
+                            results.push({ label: shipment.shipment_code, meta: "Fabric shipment", to: `/shipments?selected=${shipment.shipment_code}` });
+                        }
+                    });
+                    (labelShipments.data?.shipments || []).forEach((shipment) => {
+                        const haystack = `${shipment.shipment_code} ${shipment.label_type || ""} ${shipment.supplier || ""}`.toLowerCase();
+                        if (haystack.includes(normalizedQuery)) {
+                            results.push({ label: shipment.shipment_code, meta: "Label shipment", to: `/shipments?selected=${shipment.shipment_code}` });
+                        }
+                    });
+                    setSearchResults(results.slice(0, 6));
+                })
+                .catch(() => {
+                    if (!cancelled) setSearchResults([]);
+                });
+        }, 250);
+
+        return () => {
+            cancelled = true;
+            window.clearTimeout(handle);
+        };
+    }, [query]);
 
     return (
         <div className="operations-shell">
@@ -84,8 +143,9 @@ function OperationsShell({ title, eyebrow, children, actions }) {
                 </nav>
 
                 <div className="operations-sidebar__footer">
-                    <NavLink to="/notifications" className="operations-nav__link"><span>07</span>Notifications <b>3</b></NavLink>
-                    <NavLink to="/account" className="operations-user"><span className="avatar">KH</span><span><strong>Shariar Al Kabir</strong><small>Quality manager</small></span></NavLink>
+                    <NavLink to="/notifications" className="operations-nav__link"><span>07</span>Notifications {alertCount != null && <b>{alertCount}</b>}</NavLink>
+                    <NavLink to="/blueprint" className="operations-nav__link"><span>08</span>Blueprint</NavLink>
+                    <NavLink to="/account" className="operations-user"><span className="avatar">{user?.initials || "--"}</span><span><strong>{user?.full_name || "Not signed in"}</strong><small>{user?.job_title || ""}</small></span></NavLink>
                 </div>
             </aside>
 
@@ -98,8 +158,8 @@ function OperationsShell({ title, eyebrow, children, actions }) {
                         {searchResults.length > 0 && <div className="global-search__results">{searchResults.map((result) => <Link key={`${result.meta}-${result.label}`} to={result.to} onClick={() => setQuery("")}><span>{result.label}</span><small>{result.meta}</small></Link>)}</div>}
                     </div>
                     <div className="operations-topbar__actions">
-                        <Link to="/notifications" className="icon-button" aria-label="Notifications">Alerts <b>3</b></Link>
-                        <Link to="/account" className="avatar">KH</Link>
+                        <Link to="/notifications" className="icon-button" aria-label="Notifications">Alerts {alertCount != null && <b>{alertCount}</b>}</Link>
+                        <Link to="/account" className="avatar">{user?.initials || "--"}</Link>
                     </div>
                 </header>
 

@@ -1,6 +1,46 @@
 # Run the web app step by step
 # Open one terminal for each section below.
 
+# ===================================================================
+# 0) FRESH CLONE - start here
+# ===================================================================
+# A clone has the source but none of the build artifacts (node_modules,
+# the Python venv, the Docker volume). Nothing below downloads anything
+# you do not already have in the repo.
+#
+#   cd my-webapp
+#
+#   # a) database - schema and seed load automatically on first start
+#   docker compose up -d
+#   docker compose logs -f postgres     # wait for "database system is ready"
+#
+#   # b) backend
+#   cd backend
+#   python3 -m venv .venv
+#   source .venv/bin/activate           # Windows: .venv\Scripts\activate
+#   pip install -r requirements.txt     # installs torch; expect a large download
+#   DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=fabric_fault_detection \
+#   DB_USER=postgres DB_PASSWORD=1234 \
+#   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+#
+#   # c) frontend (new terminal)
+#   cd frontend && npm install && npm run dev -- --host 0.0.0.0
+#
+# Open http://localhost:5173 (Vite picks 5174/5175 if that port is taken;
+# the backend allows all three).
+#
+# Notes:
+#   * DB_PORT is 5432 for a fresh "docker compose up". Section 3 below uses
+#     5434 because that is what the pre-existing container on the ORIGINAL
+#     developer's machine happens to publish. Check with:
+#         docker port fabric-postgres
+#   * app/db.py has no usable defaults - the DB_* variables above are required.
+#   * The non-deterministic weights ship extracted as backend/weights/best_model/
+#     because .gitignore excludes *.zip. The backend repacks best_model.zip from
+#     that directory on first use; no download needed.
+#   * There is no need to run bulk_schema.sql / bulk_seed.sql by hand on a fresh
+#     clone - compose runs them for you. Section 2 covers rebuilding later.
+
 # --------------------------------------------------
 # 1) Go to project root
 # --------------------------------------------------

@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16
@@ -13,8 +11,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/create_table.sql:/docker-entrypoint-initdb.d/01_create_table.sql
-      - ./backend/insert_table.sql:/docker-entrypoint-initdb.d/02_insert_table.sql
+      # Run on FIRST start only (empty data volume). These are the current
+      # schema and seed; create_table.sql / insert_table.sql describe the old
+      # shared schema and must not be used.
+      - ./backend/bulk_schema.sql:/docker-entrypoint-initdb.d/01_bulk_schema.sql
+      - ./backend/bulk_seed.sql:/docker-entrypoint-initdb.d/02_bulk_seed.sql
 
 volumes:
   postgres_data:

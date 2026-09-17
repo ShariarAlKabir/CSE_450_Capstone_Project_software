@@ -1,4 +1,4 @@
-import io, os, uuid
+import io, os, uuid, zipfile
 from typing import Any
 import torch
 from PIL import Image
@@ -20,10 +20,47 @@ MODEL_PATH = os.path.join(
     'best_model.zip',
 )
 
+def _resolve_checkpoint() -> str:
+    """Return a loadable checkpoint path, rebuilding the archive if needed.
+
+    .gitignore excludes *.zip, so best_model.zip is not in the repository and a
+    fresh clone has only the extracted best_model/ directory beside it. torch
+    cannot load that directory directly, so repack it once into the expected
+    archive. Everything needed is already on disk; nothing is downloaded.
+    """
+    if os.path.exists(MODEL_PATH):
+        return MODEL_PATH
+
+    extracted = os.path.join(os.path.dirname(MODEL_PATH), 'best_model')
+    if not os.path.isdir(extracted):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                'Non-deterministic model weights are missing. Expected '
+                f'{MODEL_PATH} or an extracted best_model/ directory beside it.'
+            ),
+        )
+
+    root = os.path.dirname(MODEL_PATH)
+    tmp = MODEL_PATH + '.building'
+    with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_STORED) as archive:
+        for dirpath, _, filenames in os.walk(extracted):
+            for name in sorted(filenames):
+                full = os.path.join(dirpath, name)
+                # torch's archive keys are paths relative to the weights dir,
+                # and zip cannot store the pre-1980 mtimes git checkouts carry.
+                entry = zipfile.ZipInfo(os.path.relpath(full, root), date_time=(1980, 1, 1, 0, 0, 0))
+                entry.compress_type = zipfile.ZIP_STORED
+                with open(full, 'rb') as handle:
+                    archive.writestr(entry, handle.read())
+    os.replace(tmp, MODEL_PATH)
+    return MODEL_PATH
+
+
 def load_model():
     global MODEL
     if MODEL is not None: return MODEL
-    checkpoint = torch.load(MODEL_PATH, map_location='cpu', weights_only=False)
+    checkpoint = torch.load(_resolve_checkpoint(), map_location='cpu', weights_only=False)
     state = checkpoint['model_state_dict']
     model = models.resnet50(weights=None)
     model.fc = torch.nn.Sequential(torch.nn.Linear(model.fc.in_features,512), torch.nn.ReLU(), torch.nn.Dropout(0.4), torch.nn.Linear(512,len(CLASSES)))

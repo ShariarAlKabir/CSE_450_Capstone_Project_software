@@ -1,24 +1,181 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import axios from "axios";
 
 import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
+import FilterBar, { FilterGroup, FilterPills } from "../components/FilterBar";
+
+// Categorical slots 1-4, validated for CVD separation and the chroma/lightness
+// bands against a white card surface. Every value is direct-labelled in the
+// comparison table, which is the required relief for the sub-3:1 contrast of
+// slots 3 and 4.
+const COMPARE_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"];
+const MAX_COMPARE = COMPARE_COLORS.length;
+
+// Tier fill for the scatter. These describe a stored property of the supplier,
+// not its rank, so filtering never repaints a point.
+const TIER_FILL = {
+    Preferred: "#2e8d68",
+    Approved: "#8fae9a",
+    Conditional: "#db9940",
+};
+
+const money = (value) =>
+    value == null ? "—" : `$${Math.round(Number(value)).toLocaleString()}`;
+const num = (value, digits = 1) =>
+    value == null ? "—" : Number(value).toFixed(digits);
+
+// Every metric is either a stored column or an arithmetic combination of stored
+// columns. `better` drives which end of the row wins; "none" means the metric is
+// context (how big is this supplier) rather than performance.
+const METRICS = [
+    {
+        key: "quality", group: "Quality", label: "Measured quality", better: "high",
+        format: (v) => num(v, 1), suffix: "/100",
+        help: "Mean quality of this supplier's own inspections, 0-100.",
+    },
+    {
+        key: "rating", group: "Quality", label: "Contract rating", better: "high",
+        format: (v) => num(v, 1), suffix: "/100",
+        help: "The rating agreed in the contract, not an observed value.",
+    },
+    {
+        key: "qualityDelta", group: "Quality", label: "Measured vs contract", better: "high",
+        format: (v) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(1)}`), suffix: "pts",
+        help: "Measured quality minus contract rating. Negative means the supplier is under-performing its own contract.",
+        signed: true,
+    },
+    {
+        key: "defectRate", group: "Quality", label: "Defects per inspection", better: "low",
+        format: (v) => num(v, 2),
+        help: "Total defects divided by inspections, so volume does not distort it.",
+    },
+    {
+        key: "rejectRate", group: "Quality", label: "Reject rate", better: "low",
+        format: (v) => num(v, 1), suffix: "%",
+        help: "Share of this supplier's inspections that were rejected.",
+    },
+    {
+        key: "onTime", group: "Delivery", label: "On-time delivery", better: "high",
+        format: (v) => num(v, 1), suffix: "%",
+        help: "Shipments received on or before the promised date.",
+    },
+    {
+        key: "unitPrice", group: "Cost", label: "Contract unit price", better: "low",
+        format: (v) => (v == null ? "—" : `$${Number(v).toFixed(2)}`),
+        help: "Price per yard (fabric) or per label, from the contract.",
+    },
+    {
+        key: "effectiveCost", group: "Cost", label: "Effective cost / accepted unit", better: "low",
+        format: (v) => (v == null ? "—" : `$${Number(v).toFixed(2)}`),
+        help: "Unit price divided by the acceptance rate. What a unit you can actually use costs once rejects are paid for.",
+    },
+    {
+        key: "copqPerUnit", group: "Cost", label: "COPQ per inspection", better: "low",
+        format: (v) => (v == null ? "—" : `$${Number(v).toFixed(2)}`),
+        help: "Recorded loss divided by inspections — comparable across suppliers of different size.",
+    },
+    {
+        key: "copqShare", group: "Cost", label: "COPQ as share of spend", better: "low",
+        format: (v) => num(v, 1), suffix: "%",
+        help: "Recorded loss as a percentage of annual spend with this supplier.",
+    },
+    {
+        key: "copq", group: "Cost", label: "COPQ recorded", better: "low",
+        format: money,
+        help: "Total recorded scrap, rework, downtime and chargebacks caused by this supplier.",
+    },
+    {
+        key: "spend", group: "Scale", label: "Annual spend", better: "none",
+        format: money,
+        help: "Contracted annual spend, computed from delivered volume.",
+    },
+    {
+        key: "inspections", group: "Scale", label: "Inspections on record", better: "none",
+        format: (v) => (v == null ? "—" : Number(v).toLocaleString()),
+        help: "How much evidence the other metrics rest on.",
+    },
+    {
+        key: "shipments", group: "Scale", label: "Shipments", better: "none",
+        format: (v) => (v == null ? "—" : Number(v).toLocaleString()),
+        help: "Deliveries received from this supplier.",
+    },
+];
+
+const METRIC_BY_KEY = Object.fromEntries(METRICS.map((m) => [m.key, m]));
+const GROUPS = ["Quality", "Delivery", "Cost", "Scale"];
+
+const shapeSupplier = (row) => {
+    const isLabel = row.scope === "Label";
+    const quality = row.avg_quality != null ? Number(row.avg_quality) : null;
+    const rating = row.supplier_rating != null ? Number(row.supplier_rating) : null;
+    const rejectRate = row.reject_rate != null ? Number(row.reject_rate) : null;
+    const unitPrice = row.unit_price != null ? Number(row.unit_price) : null;
+    const copq = row.copq_amount != null ? Number(row.copq_amount) : null;
+    const spend = row.annual_spend != null ? Number(row.annual_spend) : null;
+    const inspections = Number(row.inspections || 0);
+
+    return {
+        id: `${isLabel ? "lbl" : "sup"}-${String(row.supplier_id).padStart(2, "0")}`,
+        dbId: row.supplier_id,
+        name: row.name,
+        initials: row.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase(),
+        scope: row.scope,
+        tier: row.supplier_tier || "Conditional",
+        city: row.city || "—",
+        country: row.country || "—",
+        contact: row.contact_person || "—",
+        specialty: row.fabric_specialty || row.label_specialty || "—",
+        renewal: row.renewal_date,
+        paymentTerms: row.payment_terms,
+
+        // --- comparison metrics -------------------------------------------
+        quality,
+        rating,
+        qualityDelta: quality != null && rating != null ? quality - rating : null,
+        defectRate: row.defect_rate != null ? Number(row.defect_rate) : null,
+        rejectRate,
+        onTime: row.on_time_pct != null ? Number(row.on_time_pct) : null,
+        unitPrice,
+        // Cost of a unit you can actually use: price / acceptance rate.
+        effectiveCost:
+            unitPrice != null && rejectRate != null && rejectRate < 100
+                ? unitPrice / (1 - rejectRate / 100)
+                : null,
+        copq,
+        copqPerUnit: copq != null && inspections > 0 ? copq / inspections : null,
+        copqShare: copq != null && spend ? (copq / spend) * 100 : null,
+        spend,
+        inspections,
+        shipments: Number(row.shipment_count || 0),
+    };
+};
 
 export default function SupplierAnalytics() {
     const [suppliers, setSuppliers] = useState([]);
+    const [scope, setScope] = useState("Fabric");
     const [tierFilter, setTierFilter] = useState("All");
     const [searchQuery, setSearchQuery] = useState("");
-    const [sortBy, setSortBy] = useState("rating");
-    const [selectedSupplier, setSelectedSupplier] = useState(null);
-    const [scope, setScope] = useState("Fabric");
+    const [sortBy, setSortBy] = useState("quality");
+    const [sortDir, setSortDir] = useState("desc");
     const [target, setTarget] = useState(null);
 
-    // Quality target is stored in cost_parameters, not written into the page.
+    // Fixed-length slot array: adding fills the first free slot, removing frees
+    // that slot. A supplier therefore keeps its colour for as long as it is in
+    // the comparison, no matter who else joins or leaves.
+    const [slots, setSlots] = useState([null, null, null, null]);
+    const [xMetric, setXMetric] = useState("unitPrice");
+    const [yMetric, setYMetric] = useState("defectRate");
+    const [hovered, setHovered] = useState(null);
+    const [showContext, setShowContext] = useState(false);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const [seeded, setSeeded] = useState(false);
+
     useEffect(() => {
         axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope } })
-            .then((response) => setTarget(response.data?.quality_target ?? null))
+            .then((r) => setTarget(r.data?.quality_target ?? null))
             .catch(() => setTarget(null));
     }, [scope]);
 
@@ -28,58 +185,41 @@ export default function SupplierAnalytics() {
             axios.get(`${API_BASE_URL}/api/label/suppliers`),
         ])
             .then(([fabricRes, labelRes]) => {
-                const list = [
-                    ...(fabricRes.data?.suppliers || []).map((row) => ({ ...row, scope: "Fabric" })),
-                    ...(labelRes.data?.suppliers || []).map((row) => ({ ...row, scope: "Label" })),
-                ];
-                // Everything below is a column the API measured or a contract
-                // amount it read. The previous version derived defect rate,
-                // effective cost, on-time delivery, COPQ and spend from the
-                // supplier rating with invented formulas - including a spend
-                // figure based on the row's position in the array.
-                const parsed = list.map((row) => {
-                    const isLabel = row.scope === "Label";
-                    const score = row.avg_quality != null
-                        ? Math.round(Number(row.avg_quality))
-                        : Math.round(Number(row.supplier_rating || 0));
-
-                    return {
-                        id: `${isLabel ? "lbl" : "sup"}-${String(row.supplier_id).padStart(2, "0")}`,
-                        dbId: row.supplier_id,
-                        name: row.name,
-                        initials: row.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase(),
-                        country: row.country || "—",
-                        city: row.city || "—",
-                        contact: row.contact_person || "—",
-                        email: row.contact_email || "",
-                        phone: row.contact_phone || "",
-                        score,
-                        rating: Number(row.supplier_rating || 0),
-                        // The DB tier vocabulary is Preferred / Approved / Conditional.
-                        tier: row.supplier_tier || "Conditional",
-                        trend: null,
-                        defectRate: row.defect_rate != null ? Number(row.defect_rate) : null,
-                        rejectRate: row.reject_rate != null ? Number(row.reject_rate) : null,
-                        unitPrice: row.unit_price != null ? Number(row.unit_price) : null,
-                        onTime: row.on_time_pct != null ? Number(row.on_time_pct) : null,
-                        copq: row.copq_amount != null ? Number(row.copq_amount) : null,
-                        spend: row.annual_spend != null ? Number(row.annual_spend) : null,
-                        renewal: row.renewal_date,
-                        contractCode: row.contract_code,
-                        scope: row.scope,
-                        inspections: Number(row.inspections || 0),
-                        shipments: Number(row.shipment_count || 0),
-                    };
-                });
-                setSuppliers(parsed);
-                if (parsed.length > 0) setSelectedSupplier(parsed[0]);
+                setSuppliers([
+                    ...(fabricRes.data?.suppliers || []).map((r) => shapeSupplier({ ...r, scope: "Fabric" })),
+                    ...(labelRes.data?.suppliers || []).map((r) => shapeSupplier({ ...r, scope: "Label" })),
+                ]);
             })
             .catch(() => setSuppliers([]));
     }, []);
 
-    const scopedSuppliers = useMemo(() => {
-        return suppliers.filter((s) => scope === "All" || s.scope === scope);
-    }, [suppliers, scope]);
+    // Seed the comparison from ?compare=sup-01,sup-12 (the Suppliers page links
+    // here with its current selection). Runs once, after the suppliers land, so
+    // it never fights a selection the user has since made.
+    useEffect(() => {
+        if (seeded || !suppliers.length) return;
+        setSeeded(true);
+
+        const ids = (searchParams.get("compare") || "")
+            .split(",").map((id) => id.trim()).filter(Boolean)
+            .filter((id) => suppliers.some((s) => s.id === id))
+            .slice(0, MAX_COMPARE);
+        if (!ids.length) return;
+
+        // The incoming suppliers have to be inside the active scope or the desk
+        // would open empty.
+        const scopes = new Set(ids.map((id) => suppliers.find((s) => s.id === id).scope));
+        setScope(scopes.size > 1 ? "All" : [...scopes][0]);
+
+        const next = [null, null, null, null];
+        ids.forEach((id, i) => { next[i] = id; });
+        setSlots(next);
+    }, [suppliers, searchParams, seeded]);
+
+    const scoped = useMemo(
+        () => suppliers.filter((s) => scope === "All" || s.scope === scope),
+        [suppliers, scope],
+    );
 
     const scopeCounts = {
         All: suppliers.length,
@@ -88,52 +228,150 @@ export default function SupplierAnalytics() {
     };
 
     const filtered = useMemo(() => {
-        return scopedSuppliers
-            .filter((s) => (tierFilter === "All" || s.tier === tierFilter) && s.name.toLowerCase().includes(searchQuery.toLowerCase()))
-            .sort((a, b) => {
-                if (sortBy === "name") return a.name.localeCompare(b.name);
-                if (sortBy === "rating") return b.score - a.score;
-                if (sortBy === "defect") return (a.defectRate ?? Infinity) - (b.defectRate ?? Infinity);
-                if (sortBy === "ontime") return (b.onTime ?? -1) - (a.onTime ?? -1);
-                return b.score - a.score;
-            });
-    }, [scopedSuppliers, tierFilter, searchQuery, sortBy]);
+        const q = searchQuery.trim().toLowerCase();
+        const rows = scoped.filter(
+            (s) =>
+                (tierFilter === "All" || s.tier === tierFilter) &&
+                (!q || s.name.toLowerCase().includes(q) ||
+                    s.city.toLowerCase().includes(q) || s.country.toLowerCase().includes(q)),
+        );
+        const dir = sortDir === "asc" ? 1 : -1;
+        return [...rows].sort((a, b) => {
+            if (sortBy === "name") return a.name.localeCompare(b.name) * dir;
+            const av = a[sortBy], bv = b[sortBy];
+            if (av == null && bv == null) return 0;
+            if (av == null) return 1;          // nulls always sink
+            if (bv == null) return -1;
+            return (av - bv) * dir;
+        });
+    }, [scoped, tierFilter, searchQuery, sortBy, sortDir]);
 
-    // Axis ranges for the scatter plot, from the data actually loaded.
-    const priceRange = useMemo(() => {
-        const values = scopedSuppliers.map((s) => Number(s.unitPrice)).filter((v) => Number.isFinite(v));
-        if (!values.length) return { min: 0, max: 0, span: 0 };
-        const min = Math.min(...values);
-        const max = Math.max(...values);
-        return { min, max, span: max - min };
-    }, [scopedSuppliers]);
+    // ---- comparison selection -------------------------------------------
+    const selected = slots.map((id) => (id ? scoped.find((s) => s.id === id) : null));
+    const compared = selected.filter(Boolean);
+    const colorOf = (id) => {
+        const idx = slots.indexOf(id);
+        return idx === -1 ? null : COMPARE_COLORS[idx];
+    };
+    const isCompared = (id) => slots.includes(id);
 
-    const defectRange = useMemo(() => {
-        const values = scopedSuppliers.map((s) => Number(s.defectRate)).filter((v) => Number.isFinite(v));
-        if (!values.length) return { min: 0, max: 0, span: 0 };
-        const min = Math.min(...values);
-        const max = Math.max(...values);
-        return { min, max, span: max - min };
-    }, [scopedSuppliers]);
+    const toggleCompare = (id) => {
+        setSlots((prev) => {
+            const at = prev.indexOf(id);
+            if (at !== -1) {
+                const next = [...prev];
+                next[at] = null;                      // frees the slot, keeps others
+                return next;
+            }
+            const free = prev.indexOf(null);
+            if (free === -1) return prev;             // full
+            const next = [...prev];
+            next[free] = id;
+            return next;
+        });
+    };
+    const clearCompare = () => setSlots([null, null, null, null]);
+
+    // Mirror the selection into the URL so the desk can be linked to or reloaded.
+    useEffect(() => {
+        if (!seeded) return;
+        const ids = slots.filter(Boolean);
+        setSearchParams((prev) => {
+            const params = new URLSearchParams(prev);
+            if (ids.length) params.set("compare", ids.join(","));
+            else params.delete("compare");
+            return params;
+        }, { replace: true });
+    }, [slots, seeded, setSearchParams]);
+    const compareFull = slots.every(Boolean);
+
+    const compareTop = (n) => {
+        const next = [null, null, null, null];
+        filtered.slice(0, n).forEach((s, i) => { next[i] = s.id; });
+        setSlots(next);
+    };
+
+    // Comparing the three best suppliers shows four near-identical rows. The
+    // contrast people actually want is the spread, so offer that too.
+    const compareExtremes = () => {
+        const ranked = scoped.filter((s) => s.quality != null).sort((a, b) => b.quality - a.quality);
+        if (ranked.length < 2) return;
+        const picks = [ranked[0], ranked[Math.floor(ranked.length / 2)], ranked[ranked.length - 1]]
+            .filter((s, i, arr) => arr.findIndex((x) => x.id === s.id) === i);
+        const next = [null, null, null, null];
+        picks.forEach((s, i) => { next[i] = s.id; });
+        setSlots(next);
+    };
+
+    // Best value per metric within the compared set, and a per-supplier win count.
+    const leaders = useMemo(() => {
+        const out = {};
+        METRICS.forEach((m) => {
+            if (m.better === "none") return;
+            const vals = compared.filter((s) => s[m.key] != null);
+            if (vals.length < 2) return;
+            const best = vals.reduce((a, b) =>
+                (m.better === "high" ? b[m.key] > a[m.key] : b[m.key] < a[m.key]) ? b : a);
+            // A tie has no winner. Marking the first row best would invent a
+            // ranking where the data says the suppliers are level.
+            const tied = vals.filter((s) => s[m.key] === best[m.key]).length > 1;
+            if (!tied) out[m.key] = best.id;
+        });
+        return out;
+    }, [compared]);
+
+    const wins = useMemo(() => {
+        const out = {};
+        compared.forEach((s) => { out[s.id] = 0; });
+        Object.values(leaders).forEach((id) => { out[id] = (out[id] || 0) + 1; });
+        return out;
+    }, [leaders, compared]);
 
     const stats = useMemo(() => {
-        if (!scopedSuppliers.length) return { avgScore: 0, preferredCount: 0, watchlistCount: 0, totalSpend: 0 };
-        const totalScore = scopedSuppliers.reduce((acc, s) => acc + s.score, 0);
-        const preferred = scopedSuppliers.filter((s) => s.tier === "Preferred").length;
-        const watchlist = scopedSuppliers.filter((s) => s.tier === "Conditional").length;
-        const spend = scopedSuppliers.reduce((acc, s) => acc + (Number(s.spend) || 0), 0);
+        if (!scoped.length) return { avg: 0, preferred: 0, conditional: 0, spend: 0, inspections: 0 };
+        const q = scoped.filter((s) => s.quality != null).map((s) => s.quality);
         return {
-            avgScore: (totalScore / scopedSuppliers.length).toFixed(1),
-            preferredCount: preferred,
-            watchlistCount: watchlist,
-            totalSpend: spend,
+            avg: q.length ? (q.reduce((a, b) => a + b, 0) / q.length).toFixed(1) : "—",
+            preferred: scoped.filter((s) => s.tier === "Preferred").length,
+            conditional: scoped.filter((s) => s.tier === "Conditional").length,
+            spend: scoped.reduce((a, s) => a + (s.spend || 0), 0),
+            inspections: scoped.reduce((a, s) => a + s.inspections, 0),
         };
-    }, [scopedSuppliers]);
+    }, [scoped]);
+
+    // ---- scatter ---------------------------------------------------------
+    const axisRange = (key) => {
+        const vals = scoped.map((s) => s[key]).filter((v) => v != null && Number.isFinite(v));
+        if (!vals.length) return { min: 0, max: 1, span: 1 };
+        const min = Math.min(...vals), max = Math.max(...vals);
+        return { min, max, span: max - min || 1 };
+    };
+    const xRange = useMemo(() => axisRange(xMetric), [scoped, xMetric]);
+    const yRange = useMemo(() => axisRange(yMetric), [scoped, yMetric]);
+    const plotX = (s) => (s[xMetric] == null ? null : 8 + ((s[xMetric] - xRange.min) / xRange.span) * 84);
+    const plotY = (s) => (s[yMetric] == null ? null : 10 + ((s[yMetric] - yRange.min) / yRange.span) * 78);
+
+    const sortHeader = (key, label) => (
+        <button
+            type="button"
+            onClick={() => {
+                if (sortBy === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                else { setSortBy(key); setSortDir(METRIC_BY_KEY[key]?.better === "low" ? "asc" : "desc"); }
+            }}
+            style={{
+                background: "none", padding: 0, cursor: "pointer", font: "inherit",
+                color: sortBy === key ? "var(--ink)" : "var(--muted)",
+                fontWeight: sortBy === key ? 700 : 500, whiteSpace: "nowrap",
+            }}
+        >
+            {label}{sortBy === key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+        </button>
+    );
 
     return (
         <OperationsShell
             eyebrow="Supplier intelligence & scorecard analysis"
-            title="Strategic source performance and risk allocation."
+            title="Compare suppliers on what they actually cost you."
             actions={
                 <>
                     <button className="button button-quiet" onClick={() => window.print()}>Export scorecard</button>
@@ -141,216 +379,394 @@ export default function SupplierAnalytics() {
                 </>
             }
         >
-            {/* KPI Summary Cards */}
+            {/* ---------------------------------------------------------- KPI row */}
             <section className="kpi-grid">
                 <div className="kpi-card">
                     <span>Active Suppliers</span>
-                    <strong>{scopedSuppliers.length}</strong>
-                    <small>{scopedSuppliers.reduce((acc, s) => acc + s.inspections, 0).toLocaleString()} inspections on record</small>
+                    <strong>{scoped.length}</strong>
+                    <small>{stats.inspections.toLocaleString()} inspections on record</small>
                 </div>
                 <div className="kpi-card">
                     <span>Average Quality Score</span>
-                    <strong>{stats.avgScore}</strong>
+                    <strong>{stats.avg}</strong>
                     <small>Target: {target != null ? `${target} pts` : "—"}</small>
                 </div>
                 <div className="kpi-card">
                     <span>Preferred Tier Rate</span>
-                    <strong>{scopedSuppliers.length ? Math.round((stats.preferredCount / scopedSuppliers.length) * 100) : 0}%</strong>
-                    <small>{stats.preferredCount} Preferred suppliers</small>
+                    <strong>{scoped.length ? Math.round((stats.preferred / scoped.length) * 100) : 0}%</strong>
+                    <small>{stats.preferred} Preferred suppliers</small>
                 </div>
                 <div className="kpi-card">
                     <span>Watchlist Exposure</span>
-                    <strong style={{ color: stats.watchlistCount > 0 ? "var(--danger)" : "inherit" }}>
-                        {stats.watchlistCount}
+                    <strong style={{ color: stats.conditional > 0 ? "var(--danger)" : "inherit" }}>
+                        {stats.conditional}
                     </strong>
-                    <small>Conditional tier · {stats.totalSpend ? `$${Math.round(stats.totalSpend).toLocaleString()} total spend` : "no contract on file"}</small>
+                    <small>Conditional tier · {money(stats.spend)} total spend</small>
                 </div>
             </section>
 
-            {/* Interactive Filters and Control Bar */}
-            <section className="workspace-card supplier-filterbar" style={{ display: "flex", flexWrap: "wrap", gap: "14px", alignItems: "center" }}>
-                <input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by supplier name or location..."
-                    aria-label="Search suppliers"
-                    style={{ flex: 1, minWidth: "220px", borderBottom: "1px solid var(--line)" }}
-                />
-                <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
-                <div className="filter-pills">
-                    {["All", "Preferred", "Approved", "Conditional"].map((t) => (
+            {/* ------------------------------------------------------ control bar */}
+            <FilterBar>
+                <FilterGroup label="Find" grow>
+                    <input
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Supplier name or location"
+                        aria-label="Search suppliers"
+                    />
+                </FilterGroup>
+                <FilterGroup label="Domain">
+                    <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
+                </FilterGroup>
+                <FilterGroup label="Tier">
+                    <FilterPills
+                        options={["All", "Preferred", "Approved", "Conditional"]}
+                        value={tierFilter}
+                        onChange={setTierFilter}
+                        counts={{
+                            All: scoped.length,
+                            Preferred: scoped.filter((s) => s.tier === "Preferred").length,
+                            Approved: scoped.filter((s) => s.tier === "Approved").length,
+                            Conditional: scoped.filter((s) => s.tier === "Conditional").length,
+                        }}
+                    />
+                </FilterGroup>
+                <FilterGroup label="Quick compare">
+                    <button className="button button-quiet" onClick={() => compareTop(3)}>Top 3</button>
+                    <button className="button button-quiet" onClick={compareExtremes}>Best vs worst</button>
+                </FilterGroup>
+            </FilterBar>
+
+            {/* --------------------------------------------------- comparison desk */}
+            <section className="workspace-card" style={{ marginTop: "14px" }}>
+                <div className="card-heading" style={{ flexWrap: "wrap", gap: "10px" }}>
+                    <div>
+                        <span className="section-label">Comparison desk</span>
+                        <h2>
+                            {compared.length < 2
+                                ? "Pick suppliers to compare"
+                                : `${compared.length} suppliers across ${METRICS.filter((m) => showContext || m.better !== "none").length} metrics`}
+                        </h2>
+                    </div>
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                        <label style={{ fontSize: "0.7rem", color: "var(--muted)", display: "flex", gap: "6px", alignItems: "center" }}>
+                            <input type="checkbox" checked={showContext} onChange={(e) => setShowContext(e.target.checked)} />
+                            Show scale metrics
+                        </label>
+                        {compared.length > 0 && (
+                            <button className="button button-quiet" onClick={clearCompare}>Clear</button>
+                        )}
+                    </div>
+                </div>
+
+                {/* selected chips */}
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "6px", marginBottom: "14px" }}>
+                    {compared.map((s) => (
                         <button
-                            key={t}
-                            className={tierFilter === t ? "is-active" : ""}
-                            onClick={() => setTierFilter(t)}
+                            key={s.id}
+                            onClick={() => toggleCompare(s.id)}
+                            title="Remove from comparison"
+                            style={{
+                                display: "flex", alignItems: "center", gap: "8px", cursor: "pointer",
+                                padding: "6px 10px", borderRadius: "999px", background: "var(--surface)",
+                                border: `1px solid ${colorOf(s.id)}`, fontSize: "0.74rem", fontWeight: 600,
+                            }}
                         >
-                            {t} {t !== "All" && `(${scopedSuppliers.filter((s) => s.tier === t).length})`}
+                            <i style={{ width: "9px", height: "9px", borderRadius: "50%", background: colorOf(s.id) }} />
+                            {s.name}
+                            <span style={{ color: "var(--muted)" }}>×</span>
                         </button>
                     ))}
-                </div>
-                <label className="select-control">
-                    Sort by
-                    <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                        <option value="rating">Rating (High to Low)</option>
-                        <option value="name">Supplier Name</option>
-                        <option value="defect">Lowest Defect Rate</option>
-                        <option value="ontime">Best On-Time Delivery</option>
-                    </select>
-                </label>
-            </section>
-
-            {/* Interactive Scatter Plot & Quality Matrix */}
-            <section className="dashboard-grid dashboard-grid--analytics">
-                <article className="workspace-card workspace-card--large">
-                    <div className="card-heading">
-                        <div>
-                            <span className="section-label">Interactive Quality Matrix</span>
-                            <h2>Contract Unit Price vs. Defect Rate</h2>
-                        </div>
-                        <span className="trend-chip positive">Click any point to inspect</span>
-                    </div>
-
-                    <div className="scatter-plot" style={{ position: "relative", height: "260px", background: "#fafbf8", borderRadius: "8px", border: "1px solid #dce4dc" }}>
-                        {scopedSuppliers.map((s) => {
-                            // Axes are scaled to the real spread of the loaded data, so a point
-                            // position means something instead of fitting an assumed range.
-                            const leftPct = priceRange.span
-                                ? 8 + ((Number(s.unitPrice || priceRange.min) - priceRange.min) / priceRange.span) * 82
-                                : 50;
-                            const bottomPct = defectRange.span
-                                ? 10 + ((Number(s.defectRate || 0) - defectRange.min) / defectRange.span) * 78
-                                : 50;
-                            const isSel = selectedSupplier?.id === s.id;
-
-                            return (
-                                <button
-                                    key={s.id}
-                                    className={`scatter-point scatter-point--${s.tier.toLowerCase()}`}
-                                    style={{
-                                        left: `${leftPct}%`,
-                                        bottom: `${bottomPct}%`,
-                                        transform: isSel ? "translate(-50%, 50%) scale(1.3)" : "translate(-50%, 50%)",
-                                        boxShadow: isSel ? "0 0 0 3px var(--ink)" : "0 3px 8px rgba(0,0,0,0.15)",
-                                        zIndex: isSel ? 5 : 2,
-                                        transition: "transform 150ms ease",
-                                    }}
-                                    onClick={() => setSelectedSupplier(s)}
-                                    title={`${s.name}: quality ${s.score}, ${s.unitPrice != null ? `$${s.unitPrice}/unit` : "no contract"}, ${s.defectRate ?? "—"} defects/inspection`}
-                                >
-                                    {s.initials}
-                                </button>
-                            );
-                        })}
-                        <span className="scatter-x" style={{ right: "12px", bottom: "8px", fontFamily: "DM Mono", fontSize: "0.62rem" }}>
-                            Higher Contract Unit Price ($) →
-                        </span>
-                        <span className="scatter-y" style={{ top: "12px", left: "10px", fontFamily: "DM Mono", fontSize: "0.62rem" }}>
-                            More Defects per Inspection ↑
-                        </span>
-                    </div>
-
-                    <div className="chart-legend" style={{ marginTop: "14px" }}>
-                        <span><i className="legend-dot" style={{ background: "#2e8d68" }} /> Preferred</span>
-                        <span><i className="legend-dot" style={{ background: "#6e9f7e" }} /> Approved</span>
-                        <span><i className="legend-dot" style={{ background: "#db9940" }} /> Conditional</span>
-                    </div>
-                </article>
-
-                {/* Selected Supplier Highlight Panel */}
-                <article className="workspace-card" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                    {selectedSupplier ? (
-                        <>
-                            <div>
-                                <div className="card-heading" style={{ marginBottom: "12px" }}>
-                                    <div>
-                                        <span className="section-label">Selected Mill Profile</span>
-                                        <h2>{selectedSupplier.name}</h2>
-                                        <p>{selectedSupplier.city}, {selectedSupplier.country} · {selectedSupplier.contact}</p>
-                                    </div>
-                                    <span className={`tier-badge tier-badge--${selectedSupplier.tier.toLowerCase()}`}>
-                                        {selectedSupplier.tier}
-                                    </span>
-                                </div>
-
-                                <div className="supplier-stat-grid" style={{ marginTop: "12px" }}>
-                                    <div>
-                                        <span>Measured Quality</span>
-                                        <b style={{ fontSize: "1.2rem", color: "var(--accent-dark)" }}>{selectedSupplier.score}/100</b>
-                                    </div>
-                                    <div>
-                                        <span>Defects / Inspection</span>
-                                        <b>{selectedSupplier.defectRate ?? "—"}</b>
-                                    </div>
-                                    <div>
-                                        <span>Contract Unit Price</span>
-                                        <b>{selectedSupplier.unitPrice != null ? `$${selectedSupplier.unitPrice}` : "—"}</b>
-                                    </div>
-                                    <div>
-                                        <span>On-Time Delivery</span>
-                                        <b>{selectedSupplier.onTime != null ? `${selectedSupplier.onTime}%` : "—"}</b>
-                                    </div>
-                                    <div>
-                                        <span>COPQ Recorded</span>
-                                        <b>{selectedSupplier.copq != null ? `$${Math.round(selectedSupplier.copq).toLocaleString()}` : "—"}</b>
-                                    </div>
-                                    <div>
-                                        <span>Annual Spend</span>
-                                        <b>{selectedSupplier.spend != null ? `$${Math.round(selectedSupplier.spend).toLocaleString()}` : "—"}</b>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div style={{ marginTop: "18px", paddingTop: "14px", borderTop: "1px solid var(--line)", display: "flex", gap: "10px" }}>
-                                <Link
-                                    className="button button-primary button-primary--wide"
-                                    to={`/suppliers?selected=${selectedSupplier.id}`}
-                                    style={{ flex: 1, textAlign: "center" }}
-                                >
-                                    Open Full Supplier Profile →
-                                </Link>
-                            </div>
-                        </>
-                    ) : (
-                        <p>Select a supplier to see performance metrics.</p>
+                    {!compared.length && (
+                        <p style={{ margin: 0, fontSize: "0.76rem", color: "var(--muted)" }}>
+                            Tick up to {MAX_COMPARE} suppliers in the register below, or click points on the plot.
+                        </p>
                     )}
-                </article>
+                    {compareFull && (
+                        <span style={{ fontSize: "0.7rem", color: "var(--muted)", alignSelf: "center" }}>
+                            Maximum of {MAX_COMPARE} — remove one to add another.
+                        </span>
+                    )}
+                </div>
+
+                {compared.length >= 2 ? (
+                    <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: `${240 + compared.length * 150}px` }}>
+                            <thead>
+                                <tr>
+                                    <th style={{ textAlign: "left", padding: "0 10px 10px 0", width: "240px" }} />
+                                    {compared.map((s) => (
+                                        <th key={s.id} style={{
+                                            padding: "0 8px 10px", textAlign: "left", verticalAlign: "bottom",
+                                            width: `${(100 - 0) / compared.length}%`,
+                                        }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                                <i style={{ width: "9px", height: "9px", borderRadius: "50%", background: colorOf(s.id), flexShrink: 0 }} />
+                                                <span style={{ fontSize: "0.74rem", fontWeight: 700, lineHeight: 1.25 }}>{s.name}</span>
+                                            </div>
+                                            <small style={{ color: "var(--muted)", fontSize: "0.62rem" }}>
+                                                {s.tier} · {wins[s.id] || 0} best
+                                            </small>
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {GROUPS.map((group) => {
+                                    const rows = METRICS.filter(
+                                        (m) => m.group === group && (showContext || m.better !== "none"),
+                                    );
+                                    if (!rows.length) return null;
+                                    return (
+                                        <Fragment key={group}>
+                                            <tr>
+                                                <td colSpan={compared.length + 1} style={{ padding: "14px 0 4px" }}>
+                                                    <span className="section-label" style={{ fontSize: "0.58rem" }}>{group}</span>
+                                                </td>
+                                            </tr>
+                                            {rows.map((m) => {
+                                                const vals = compared.map((s) => s[m.key]).filter((v) => v != null);
+                                                const max = vals.length ? Math.max(...vals.map(Math.abs)) : 0;
+                                                const allSame = vals.length > 1 && vals.every((v) => v === vals[0]);
+                                                return (
+                                                    <tr key={m.key} style={{ borderTop: "1px solid #eef1ed" }}>
+                                                        <td style={{ padding: "8px 10px 8px 0", verticalAlign: "middle" }} title={m.help}>
+                                                            <div style={{ fontSize: "0.73rem", fontWeight: 600, lineHeight: 1.3 }}>
+                                                                {m.label}{m.suffix ? <span style={{ color: "var(--muted)", fontWeight: 400 }}> ({m.suffix})</span> : null}
+                                                            </div>
+                                                            <small style={{ color: "var(--muted)", fontSize: "0.6rem" }}>
+                                                                {m.better === "high" ? "higher is better"
+                                                                    : m.better === "low" ? "lower is better" : "context"}
+                                                                {allSame && " · all equal"}
+                                                            </small>
+                                                        </td>
+                                                        {compared.map((s) => {
+                                                            const v = s[m.key];
+                                                            const isBest = leaders[m.key] === s.id;
+                                                            // No bar when there is nothing to compare: an
+                                                            // empty track next to "0.0" reads as broken.
+                                                            const drawBar = v != null && v !== 0 && max > 0;
+                                                            const pct = drawBar ? Math.max(3, (Math.abs(v) / max) * 100) : 0;
+                                                            return (
+                                                                <td key={s.id} style={{
+                                                                    padding: "8px", verticalAlign: "middle",
+                                                                    background: isBest ? "color-mix(in srgb, var(--success) 8%, transparent)" : "transparent",
+                                                                    borderRadius: "6px",
+                                                                }}>
+                                                                    <div style={{ display: "flex", alignItems: "baseline", gap: "5px" }}>
+                                                                        <b style={{
+                                                                            fontSize: "0.82rem", fontVariantNumeric: "tabular-nums",
+                                                                            color: v == null ? "var(--muted)" : "var(--ink)",
+                                                                        }}>
+                                                                            {m.format(v)}
+                                                                        </b>
+                                                                        {isBest && <span title="Best of the compared set" style={{ color: "var(--success)", fontSize: "0.66rem", fontWeight: 700 }}>▲</span>}
+                                                                    </div>
+                                                                    {/* signed metrics grow from a centre baseline so a
+                                                                        negative value cannot look like a large positive one */}
+                                                                    <div style={{ height: "5px", background: "#f0f3ef", borderRadius: "3px", marginTop: "5px", position: "relative", overflow: "hidden" }}>
+                                                                        {drawBar && (m.signed ? (
+                                                                            <div style={{
+                                                                                position: "absolute", left: v >= 0 ? "50%" : undefined,
+                                                                                right: v < 0 ? "50%" : undefined,
+                                                                                width: `${pct / 2}%`, height: "100%",
+                                                                                background: colorOf(s.id), borderRadius: "3px",
+                                                                            }} />
+                                                                        ) : (
+                                                                            <div style={{ width: `${pct}%`, height: "100%", background: colorOf(s.id), borderRadius: "3px" }} />
+                                                                        ))}
+                                                                        {m.signed && <i style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: "1px", background: "var(--line)" }} />}
+                                                                    </div>
+                                                                </td>
+                                                            );
+                                                        })}
+                                                    </tr>
+                                                );
+                                            })}
+                                        </Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                        <p style={{ fontSize: "0.66rem", color: "var(--muted)", margin: "12px 0 0", paddingTop: "10px", borderTop: "1px solid var(--line)" }}>
+                            Each bar is that value against the largest in its own row, so bars compare across a row, never
+                            down a column. ▲ marks the best value; a tied row has no winner. Signed rows grow from a centre line.
+                        </p>
+                    </div>
+                ) : (
+                    <p style={{ fontSize: "0.78rem", color: "var(--muted)", margin: 0 }}>
+                        Select at least two suppliers to see the side-by-side breakdown.
+                    </p>
+                )}
             </section>
 
-            {/* Detailed Supplier Table with Live Data */}
+            {/* ------------------------------------------------------- scatter plot */}
+            <section className="workspace-card" style={{ marginTop: "14px" }}>
+                <div className="card-heading" style={{ flexWrap: "wrap", gap: "10px" }}>
+                    <div>
+                        <span className="section-label">Positioning plot</span>
+                        <h2>Plot any metric against any other</h2>
+                    </div>
+                    <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                        <label className="select-control">
+                            X
+                            <select value={xMetric} onChange={(e) => setXMetric(e.target.value)}>
+                                {METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                            </select>
+                        </label>
+                        <label className="select-control">
+                            Y
+                            <select value={yMetric} onChange={(e) => setYMetric(e.target.value)}>
+                                {METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                            </select>
+                        </label>
+                    </div>
+                </div>
+
+                <div style={{ position: "relative", height: "300px", background: "#fafbf8", borderRadius: "8px", border: "1px solid var(--line)", marginTop: "12px" }}>
+                    {scoped.map((s) => {
+                        const left = plotX(s), bottom = plotY(s);
+                        if (left == null || bottom == null) return null;
+                        const ring = colorOf(s.id);
+                        return (
+                            <button
+                                key={s.id}
+                                onClick={() => toggleCompare(s.id)}
+                                onMouseEnter={() => setHovered(s.id)}
+                                onMouseLeave={() => setHovered(null)}
+                                aria-label={`${s.name}: ${METRIC_BY_KEY[xMetric].label} ${METRIC_BY_KEY[xMetric].format(s[xMetric])}, ${METRIC_BY_KEY[yMetric].label} ${METRIC_BY_KEY[yMetric].format(s[yMetric])}`}
+                                style={{
+                                    position: "absolute", left: `${left}%`, bottom: `${bottom}%`,
+                                    transform: "translate(-50%, 50%)",
+                                    width: ring ? "30px" : "22px", height: ring ? "30px" : "22px",
+                                    borderRadius: "50%", cursor: "pointer",
+                                    background: TIER_FILL[s.tier] || "#8fae9a",
+                                    color: "white", fontSize: "0.56rem", fontWeight: 700,
+                                    // 2px surface ring keeps overlapping marks legible; the
+                                    // comparison colour rides on the outside so tier (fill)
+                                    // and comparison slot (ring) never fight for one channel.
+                                    boxShadow: ring
+                                        ? `0 0 0 2px #fafbf8, 0 0 0 5px ${ring}`
+                                        : "0 0 0 2px #fafbf8, 0 2px 5px rgba(0,0,0,0.12)",
+                                    zIndex: ring ? 4 : hovered === s.id ? 5 : 2,
+                                    transition: "width 140ms ease, height 140ms ease",
+                                }}
+                            >
+                                {s.initials}
+                            </button>
+                        );
+                    })}
+
+                    {hovered && (() => {
+                        const s = scoped.find((x) => x.id === hovered);
+                        if (!s) return null;
+                        return (
+                            <div style={{
+                                position: "absolute", left: `${Math.min(plotX(s) ?? 50, 62)}%`,
+                                bottom: `${Math.min((plotY(s) ?? 50) + 9, 82)}%`,
+                                background: "var(--ink)", color: "white", padding: "8px 10px",
+                                borderRadius: "7px", fontSize: "0.68rem", pointerEvents: "none",
+                                zIndex: 9, minWidth: "180px", boxShadow: "0 6px 18px rgba(0,0,0,0.22)",
+                            }}>
+                                <b>{s.name}</b>
+                                <div style={{ opacity: 0.75, fontSize: "0.62rem", marginBottom: "4px" }}>{s.tier} · {s.city}, {s.country}</div>
+                                <div>{METRIC_BY_KEY[xMetric].label}: <b>{METRIC_BY_KEY[xMetric].format(s[xMetric])}</b></div>
+                                <div>{METRIC_BY_KEY[yMetric].label}: <b>{METRIC_BY_KEY[yMetric].format(s[yMetric])}</b></div>
+                                <div style={{ opacity: 0.7, fontSize: "0.6rem", marginTop: "4px" }}>
+                                    {isCompared(s.id) ? "Click to remove from comparison" : "Click to add to comparison"}
+                                </div>
+                            </div>
+                        );
+                    })()}
+
+                    <span style={{ position: "absolute", right: "12px", bottom: "8px", fontFamily: "DM Mono", fontSize: "0.6rem", color: "var(--muted)" }}>
+                        {METRIC_BY_KEY[xMetric].label} →
+                    </span>
+                    <span style={{ position: "absolute", top: "12px", left: "10px", fontFamily: "DM Mono", fontSize: "0.6rem", color: "var(--muted)" }}>
+                        {METRIC_BY_KEY[yMetric].label} ↑
+                    </span>
+                </div>
+
+                <div className="chart-legend" style={{ marginTop: "12px", flexWrap: "wrap", gap: "14px" }}>
+                    {Object.entries(TIER_FILL).map(([tier, fill]) => (
+                        <span key={tier}><i className="legend-dot" style={{ background: fill }} /> {tier}</span>
+                    ))}
+                    <span style={{ color: "var(--muted)", fontSize: "0.66rem" }}>
+                        Ringed points are in the comparison · axes scale to the loaded data
+                    </span>
+                </div>
+            </section>
+
+            {/* ---------------------------------------------------------- register */}
             <section className="workspace-card" style={{ marginTop: "14px" }}>
                 <div className="card-heading">
                     <div>
-                        <span className="section-label">Comprehensive Scorecard</span>
-                        <h2>Supplier Ranking Register ({filtered.length} Mills)</h2>
+                        <span className="section-label">Comprehensive scorecard</span>
+                        <h2>Supplier register ({filtered.length})</h2>
                     </div>
                 </div>
 
-                <div className="supplier-table" style={{ marginTop: "10px" }}>
-                    {filtered.map((s) => (
-                        <div
-                            key={s.id}
-                            className={`supplier-row ${selectedSupplier?.id === s.id ? "is-selected" : ""}`}
-                            onClick={() => setSelectedSupplier(s)}
-                            style={{ cursor: "pointer" }}
-                        >
-                            <span className="avatar">{s.initials}</span>
-                            <span>
-                                <strong>{s.name}</strong>
-                                <small>{s.city}, {s.country} · {s.contact}</small>
-                            </span>
-                            <span className={`tier-badge tier-badge--${s.tier.toLowerCase()}`}>{s.tier}</span>
-                            <span className="trend-label">{s.rejectRate != null ? `${s.rejectRate}% rejected` : "no inspections"}</span>
-                            <strong>{s.score}</strong>
-                            <Link
-                                to={`/suppliers?selected=${s.id}`}
-                                className="text-link"
-                                onClick={(e) => e.stopPropagation()}
-                                style={{ fontSize: "0.68rem" }}
-                            >
-                                Profile →
-                            </Link>
-                        </div>
-                    ))}
+                <div style={{ overflow: "auto", marginTop: "10px", maxHeight: "460px" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.74rem", minWidth: "780px" }}>
+                        <thead>
+                            <tr style={{ textAlign: "left", borderBottom: "1px solid var(--line)" }}>
+                                <th style={{ padding: "8px 6px", width: "34px" }} />
+                                <th style={{ padding: "8px 6px" }}>{sortHeader("name", "Supplier")}</th>
+                                <th style={{ padding: "8px 6px" }}>Tier</th>
+                                <th style={{ padding: "8px 6px", textAlign: "right" }}>{sortHeader("quality", "Quality")}</th>
+                                <th style={{ padding: "8px 6px", textAlign: "right" }}>{sortHeader("defectRate", "Defects/insp")}</th>
+                                <th style={{ padding: "8px 6px", textAlign: "right" }}>{sortHeader("rejectRate", "Reject %")}</th>
+                                <th style={{ padding: "8px 6px", textAlign: "right" }}>{sortHeader("onTime", "On-time %")}</th>
+                                <th style={{ padding: "8px 6px", textAlign: "right" }}>{sortHeader("effectiveCost", "Eff. cost")}</th>
+                                <th style={{ padding: "8px 6px", textAlign: "right" }}>{sortHeader("copqPerUnit", "COPQ/insp")}</th>
+                                <th style={{ padding: "8px 6px", textAlign: "right" }}>{sortHeader("spend", "Spend")}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filtered.map((s) => {
+                                const ring = colorOf(s.id);
+                                return (
+                                    <tr
+                                        key={s.id}
+                                        style={{
+                                            borderBottom: "1px solid #eef1ed",
+                                            background: ring ? `color-mix(in srgb, ${ring} 7%, transparent)` : "transparent",
+                                        }}
+                                    >
+                                        <td style={{ padding: "7px 6px" }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={!!ring}
+                                                disabled={!ring && compareFull}
+                                                onChange={() => toggleCompare(s.id)}
+                                                aria-label={`Compare ${s.name}`}
+                                                style={{ accentColor: ring || "var(--accent)", cursor: !ring && compareFull ? "not-allowed" : "pointer" }}
+                                            />
+                                        </td>
+                                        <td style={{ padding: "7px 6px" }}>
+                                            <Link to={`/suppliers?selected=${s.id}`} style={{ fontWeight: 700 }}>{s.name}</Link>
+                                            <small style={{ display: "block", color: "var(--muted)", fontSize: "0.64rem" }}>
+                                                {s.city}, {s.country} · {s.inspections.toLocaleString()} inspections
+                                            </small>
+                                        </td>
+                                        <td style={{ padding: "7px 6px" }}>
+                                            <span className={`tier-badge tier-badge--${s.tier.toLowerCase()}`}>{s.tier}</span>
+                                        </td>
+                                        <td style={{ padding: "7px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}><b>{num(s.quality)}</b></td>
+                                        <td style={{ padding: "7px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{num(s.defectRate, 2)}</td>
+                                        <td style={{ padding: "7px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: s.rejectRate > 20 ? "var(--danger)" : "inherit" }}>{num(s.rejectRate)}</td>
+                                        <td style={{ padding: "7px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{num(s.onTime)}</td>
+                                        <td style={{ padding: "7px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{s.effectiveCost == null ? "—" : `$${s.effectiveCost.toFixed(2)}`}</td>
+                                        <td style={{ padding: "7px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{s.copqPerUnit == null ? "—" : `$${s.copqPerUnit.toFixed(2)}`}</td>
+                                        <td style={{ padding: "7px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{money(s.spend)}</td>
+                                    </tr>
+                                );
+                            })}
+                            {!filtered.length && (
+                                <tr><td colSpan={10} style={{ padding: "16px 6px", color: "var(--muted)" }}>No suppliers match these filters.</td></tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
             </section>
         </OperationsShell>

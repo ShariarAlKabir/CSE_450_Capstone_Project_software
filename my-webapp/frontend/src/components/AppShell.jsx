@@ -1,7 +1,19 @@
 import { Link } from "react-router-dom";
 
+import OperationsShell from "./OperationsShell";
+
+/**
+ * The inspection tools (fabric, label, deterministic, non-deterministic) used to
+ * render their own full-page shell: no sidebar, a different type scale, and a
+ * separate accent per page. Launching an inspection from the dashboard dropped
+ * the operator into what looked like a different product with no way back except
+ * one "Back" link.
+ *
+ * AppShell now adapts its old API onto the operations shell, so those pages keep
+ * their navigation and match the rest of the app without each page being
+ * rewritten. `description` and `aside` become an intro band above the content.
+ */
 function AppShell({
-    accent = "teal",
     eyebrow,
     title,
     description,
@@ -11,59 +23,24 @@ function AppShell({
     aside,
 }) {
     return (
-        <main className={`app-shell accent-${accent}`}>
-            <div className="app-shell__backdrop" />
-
-            <div className="app-shell__container">
-                <header className="app-header">
-                    <div className="app-header__brand">
-                        <span className="app-header__kicker">
-                            Textile Quality Platform
-                        </span>
-
-                        <span className="app-header__date">
-                            Professional inspection workspace
-                        </span>
-                    </div>
-
-                    {backTo && (
-                        <Link className="button button-ghost" to={backTo}>
-                            {backLabel}
-                        </Link>
-                    )}
-                </header>
-
-                <section className="hero-card">
-                    <div className="hero-card__content">
-                        {eyebrow && (
-                            <span className="eyebrow">
-                                {eyebrow}
-                            </span>
-                        )}
-
-                        <h1>
-                            {title}
-                        </h1>
-
-                        {description && (
-                            <p className="hero-card__description">
-                                {description}
-                            </p>
-                        )}
-                    </div>
-
-                    {aside && (
-                        <aside className="hero-card__aside">
-                            {aside}
-                        </aside>
-                    )}
+        <OperationsShell
+            eyebrow={eyebrow}
+            title={title}
+            actions={backTo && (
+                <Link className="button button-quiet" to={backTo}>{backLabel}</Link>
+            )}
+        >
+            {(description || aside) && (
+                <section className="tool-intro">
+                    {description && <p className="tool-intro__lead">{description}</p>}
+                    {aside && <div className="tool-intro__aside">{aside}</div>}
                 </section>
+            )}
 
-                <div className="page-content">
-                    {children}
-                </div>
+            <div className="tool-content">
+                {children}
             </div>
-        </main>
+        </OperationsShell>
     );
 }
 

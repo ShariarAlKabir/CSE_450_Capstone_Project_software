@@ -5,6 +5,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
+import FilterBar, { FilterGroup, FilterPills } from "../components/FilterBar";
 
 export default function ShipmentAnalytics() {
     const [shipments, setShipments] = useState([]);
@@ -172,35 +173,27 @@ export default function ShipmentAnalytics() {
             </section>
 
             {/* Interactive Filters */}
-            <section className="workspace-card supplier-filterbar" style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center" }}>
-                <input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by shipment code, supplier, or fabric..."
-                    aria-label="Search shipments"
-                    style={{ flex: 1, minWidth: "220px", borderBottom: "1px solid var(--line)" }}
-                />
-                <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
-                <div className="filter-pills">
-                    {["All", "Cleared", "Inspecting", "In transit", "Rejected"].map((st) => (
-                        <button
-                            key={st}
-                            className={stageFilter === st ? "is-active" : ""}
-                            onClick={() => setStageFilter(st)}
-                        >
-                            {st}
-                        </button>
-                    ))}
-                </div>
-                <label className="select-control">
-                    Fabric
-                    <select value={fabricFilter} onChange={(e) => setFabricFilter(e.target.value)}>
-                        {fabricTypes.map((f) => (
-                            <option key={f} value={f}>{f}</option>
-                        ))}
+            <FilterBar>
+                <FilterGroup label="Find" grow>
+                    <input
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Shipment code, supplier or fabric"
+                        aria-label="Search shipments"
+                    />
+                </FilterGroup>
+                <FilterGroup label="Domain">
+                    <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
+                </FilterGroup>
+                <FilterGroup label="Lifecycle">
+                    <FilterPills options={["All", "Cleared", "Inspecting", "In transit", "Rejected"]} value={stageFilter} onChange={setStageFilter} />
+                </FilterGroup>
+                <FilterGroup label="Fabric">
+                    <select value={fabricFilter} onChange={(e) => setFabricFilter(e.target.value)} aria-label="Filter by fabric">
+                        {fabricTypes.map((f) => <option key={f} value={f}>{f}</option>)}
                     </select>
-                </label>
-            </section>
+                </FilterGroup>
+            </FilterBar>
 
             {/* Sampling Pipeline & Fabric Breakdown Section */}
             <section className="dashboard-grid dashboard-grid--analytics">

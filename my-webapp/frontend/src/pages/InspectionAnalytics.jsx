@@ -305,24 +305,28 @@ export default function InspectionAnalytics() {
                         <span className="section-label">Inspection Queue Register</span>
                         <h2>Live Decisions ({filtered.length} Roll Records)</h2>
                     </div>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                </div>
+                <div className="card-filters">
+                    <div className="card-filters__group card-filters__group--grow">
+                        <span className="filterbar__label">Find</span>
                         <input
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search by code or supplier..."
-                            style={{ padding: "6px 10px", border: "1px solid var(--line)", borderRadius: "6px", fontSize: "0.72rem" }}
+                            placeholder="Inspection code or supplier"
+                            aria-label="Search inspections"
+                            className="card-filters__input"
                         />
+                    </div>
+                    <div className="card-filters__group">
+                        <span className="filterbar__label">Status</span>
                         <div className="filter-pills">
                             {["All", "Needs review", "Approved", "Rejected"].map((st) => (
-                                <button
-                                    key={st}
-                                    className={statusFilter === st ? "is-active" : ""}
-                                    onClick={() => setStatusFilter(st)}
-                                >
-                                    {st}
-                                </button>
+                                <button key={st} className={statusFilter === st ? "is-active" : ""} onClick={() => setStatusFilter(st)}>{st}</button>
                             ))}
                         </div>
+                    </div>
+                    <div className="card-filters__group">
+                        <span className="filterbar__label">Domain</span>
                         <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
                     </div>
                 </div>

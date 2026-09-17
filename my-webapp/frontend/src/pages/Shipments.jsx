@@ -149,7 +149,7 @@ function Shipments() {
 
     if (loading && shipments.length === 0) {
         return (
-            <OperationsShell eyebrow="Inbound logistics" title="Loading shipment data..." actions={<><button className="button button-primary" onClick={() => setShowAddShipment(true)}>Add shipment</button><button className="button button-quiet" onClick={() => window.print()}>Export shipment view</button></>}>
+            <OperationsShell eyebrow="Inbound logistics" title="Loading shipment data..." actions={<><button className="button button-quiet" onClick={() => window.print()}>Export shipment view</button><button className="button button-primary" onClick={() => setShowAddShipment(true)}>Add shipment</button></>}>
                 <section className="workspace-card"><p>Fetching live shipment data from the backend.</p></section>
                 {showAddShipment && (
                     <Modal eyebrow="Inbound logistics" title="Add shipment" onCancel={() => setShowAddShipment(false)}>
@@ -178,16 +178,22 @@ function Shipments() {
 
     return (
         <>
-        <OperationsShell eyebrow="Inbound logistics" title="Every roll has a decision path." actions={<><button className="button button-primary" onClick={() => setShowAddShipment(true)}>Add shipment</button><button className="button button-quiet" onClick={() => window.print()}>Export shipment view</button></>}>
+        <OperationsShell eyebrow="Inbound logistics" title="Every roll has a decision path." actions={<><button className="button button-quiet" onClick={() => window.print()}>Export shipment view</button><button className="button button-primary" onClick={() => setShowAddShipment(true)}>Add shipment</button></>}>
             <section className="shipment-board">
                 <article className="workspace-card shipment-list">
                     <div className="card-heading">
                         <div><span className="section-label">Shipment register</span><h2>Inbound queue</h2></div>
                         <span>{shipments.length} shipments</span>
                     </div>
-                    <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                        <div className="filter-pills">{["All", "In transit", "Inspecting", "Cleared", "Rejected"].map((item) => <button key={item} className={filter === item ? "is-active" : ""} onClick={() => setFilter(item)}>{item}</button>)}</div>
-                        <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
+                    <div className="card-filters">
+                        <div className="card-filters__group">
+                            <span className="filterbar__label">Lifecycle</span>
+                            <div className="filter-pills">{["All", "In transit", "Inspecting", "Cleared", "Rejected"].map((item) => <button key={item} className={filter === item ? "is-active" : ""} onClick={() => setFilter(item)}>{item}</button>)}</div>
+                        </div>
+                        <div className="card-filters__group">
+                            <span className="filterbar__label">Domain</span>
+                            <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
+                        </div>
                     </div>
                     <div className="shipment-rows">
                         {filtered.map((shipment) => (

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
+import FilterBar, { FilterGroup, FilterPills } from "../components/FilterBar";
 import ScopeToggle from "../components/ScopeToggle";
 import Modal from "../components/Modal";
 import { ScoreRing } from "../components/Visuals";
@@ -66,6 +67,9 @@ function Suppliers() {
     const [scope, setScope] = useState("Fabric");
     const [showAddSupplier, setShowAddSupplier] = useState(false);
     const [profileTab, setProfileTab] = useState("overview");
+    // Comparison lives beside the register rather than below the fold, so
+    // ticking suppliers and reading the result do not need a scroll between them.
+    const [workspaceTab, setWorkspaceTab] = useState("profile");
     const [copied, setCopied] = useState("");
     const [saving, setSaving] = useState(false);
     const [formError, setFormError] = useState("");
@@ -137,6 +141,16 @@ function Suppliers() {
         Fabric: suppliers.filter((supplier) => supplier.scope === "Fabric").length,
         Label: suppliers.filter((supplier) => supplier.scope === "Label").length,
     };
+    const tierCounts = useMemo(() => {
+        const inScope = suppliers.filter((s) => scope === "All" || s.scope === scope);
+        return {
+            All: inScope.length,
+            Preferred: inScope.filter((s) => s.tier === "Preferred").length,
+            Approved: inScope.filter((s) => s.tier === "Approved").length,
+            Conditional: inScope.filter((s) => s.tier === "Conditional").length,
+        };
+    }, [suppliers, scope]);
+
     const filtered = useMemo(() => suppliers
         .filter((supplier) => (scope === "All" || supplier.scope === scope) && (tier === "All" || supplier.tier === tier) && supplier.name.toLowerCase().includes(query.toLowerCase()))
         .sort((a, b) => {
@@ -174,13 +188,19 @@ function Suppliers() {
     const compared = suppliers.filter((supplier) => compareIds.includes(supplier.id));
 
     const selectSupplier = (id) => setSearchParams({ selected: id });
-    const toggleComparison = (id) => setCompareIds((current) => current.includes(id)
-        ? current.filter((currentId) => currentId !== id)
-        : current.length === 2 ? [current[1], id] : [...current, id]);
+    const toggleComparison = (id) => setCompareIds((current) => {
+        const next = current.includes(id)
+            ? current.filter((currentId) => currentId !== id)
+            : current.length === 2 ? [current[1], id] : [...current, id];
+        // Ticking a second supplier is a request to see the comparison.
+        if (next.length >= 2) setWorkspaceTab("compare");
+        if (next.length === 0) setWorkspaceTab("profile");
+        return next;
+    });
 
     if (loading && suppliers.length === 0) {
         return (
-            <OperationsShell eyebrow="Supplier intelligence" title="Loading supplier data..." actions={<><button className="button button-primary" onClick={() => setShowAddSupplier(true)}>Add supplier</button><button className="button button-quiet" onClick={() => window.print()}>Export negotiation packet</button></>}>
+            <OperationsShell eyebrow="Supplier intelligence" title="Loading supplier data..." actions={<><button className="button button-quiet" onClick={() => window.print()}>Export negotiation packet</button><button className="button button-primary" onClick={() => setShowAddSupplier(true)}>Add supplier</button></>}>
                 <section className="workspace-card"><p>Fetching live supplier data from the backend.</p></section>
                 {showAddSupplier && (
                     <Modal eyebrow="Supplier intelligence" title="Add supplier" onCancel={() => setShowAddSupplier(false)}>
@@ -206,13 +226,31 @@ function Suppliers() {
 
     return (
         <>
-        <OperationsShell eyebrow="Supplier intelligence" title="Manage the quality of your source." actions={<><button className="button button-primary" onClick={() => setShowAddSupplier(true)}>Add supplier</button><button className="button button-quiet" onClick={() => window.print()}>Export negotiation packet</button></>}>
-            <section className="workspace-card supplier-filterbar">
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a supplier" aria-label="Find a supplier" />
-                <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
-                <div className="filter-pills">{["All", "Preferred", "Standard", "Watchlist"].map((item) => <button className={tier === item ? "is-active" : ""} onClick={() => setTier(item)} key={item}>{item}</button>)}</div>
-                <label className="select-control">Sort by <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}><option value="score">Measured quality</option><option value="rating">Contract rating</option><option value="defect">Lowest defect rate</option><option value="delivery">On-time delivery</option><option value="spend">Annual spend</option><option value="name">Name</option></select></label>
-            </section>
+        <OperationsShell eyebrow="Supplier intelligence" title="Manage the quality of your source." actions={<><button className="button button-quiet" onClick={() => window.print()}>Export negotiation packet</button><button className="button button-primary" onClick={() => setShowAddSupplier(true)}>Add supplier</button></>}>
+            <FilterBar>
+                <FilterGroup label="Find" grow>
+                    <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Supplier name or location" aria-label="Find a supplier" />
+                </FilterGroup>
+                <FilterGroup label="Domain">
+                    <ScopeToggle value={scope} onChange={setScope} counts={scopeCounts} />
+                </FilterGroup>
+                <FilterGroup label="Tier">
+                    {/* These are the values stored on the supplier. The old list
+                        offered "Standard" and "Watchlist", which match nothing in
+                        the data, so both filtered the register down to zero. */}
+                    <FilterPills options={["All", "Preferred", "Approved", "Conditional"]} value={tier} onChange={setTier} counts={tierCounts} />
+                </FilterGroup>
+                <FilterGroup label="Sort by">
+                    <select value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label="Sort suppliers by">
+                        <option value="score">Measured quality</option>
+                        <option value="rating">Contract rating</option>
+                        <option value="defect">Lowest defect rate</option>
+                        <option value="delivery">On-time delivery</option>
+                        <option value="spend">Annual spend</option>
+                        <option value="name">Name</option>
+                    </select>
+                </FilterGroup>
+            </FilterBar>
 
             <section className="supplier-layout">
                 <article className="workspace-card supplier-table-card">
@@ -220,20 +258,78 @@ function Suppliers() {
                         {filtered.map((supplier) => (
                             <button className={`supplier-row ${selected?.id === supplier.id ? "is-selected" : ""}`} onClick={() => selectSupplier(supplier.id)} key={supplier.id}>
                                 <span className="avatar">{supplier.initials}</span>
-                                <span><strong>{supplier.name}</strong><small>{supplier.location}</small></span>
-                                <span className={`tier-badge tier-badge--${tierClass(supplier.tier)}`}>{supplier.tier}</span>
-                                <span className="trend-label">{supplier.rejectRate != null ? `${supplier.rejectRate}% rejected` : "no inspections"}</span>
-                                <strong>{supplier.score}</strong>
-                                <label className="compare-toggle" onClick={(event) => event.stopPropagation()}>
-                                    <input type="checkbox" checked={compareIds.includes(supplier.id)} onChange={() => toggleComparison(supplier.id)} />Compare
+                                {/* Name, place and tier stack in one flexible cell so the row
+                                    fits the register column without truncating. The reject rate
+                                    lives in the profile and comparison panels beside it. */}
+                                <span className="supplier-row__id">
+                                    <strong>{supplier.name}</strong>
+                                    <small>{supplier.location}</small>
+                                    <span className={`tier-badge tier-badge--${tierClass(supplier.tier)}`}>{supplier.tier}</span>
+                                </span>
+                                <strong className="supplier-row__score">{supplier.score}</strong>
+                                <label className="compare-toggle" onClick={(event) => event.stopPropagation()} title="Add to comparison">
+                                    <input type="checkbox" checked={compareIds.includes(supplier.id)} onChange={() => toggleComparison(supplier.id)} />
                                 </label>
                             </button>
                         ))}
                     </div>
                 </article>
 
-                {selected ? (
-                    <article className="workspace-card supplier-profile">
+                <div className="supplier-workspace">
+                    <div className="workspace-tabs" role="tablist" aria-label="Supplier workspace">
+                        <button type="button" role="tab" aria-selected={workspaceTab === "profile"}
+                            className={workspaceTab === "profile" ? "is-active" : ""}
+                            onClick={() => setWorkspaceTab("profile")}>
+                            Profile
+                        </button>
+                        <button type="button" role="tab" aria-selected={workspaceTab === "compare"}
+                            className={workspaceTab === "compare" ? "is-active" : ""}
+                            onClick={() => setWorkspaceTab("compare")}>
+                            Compare{compared.length ? ` (${compared.length})` : ""}
+                        </button>
+                    </div>
+
+                    {workspaceTab === "compare" ? (
+        <article className="workspace-card">
+                            <div className="card-heading">
+                                <div><span className="section-label">Side-by-side</span><h2>Comparison desk</h2></div>
+                                {compared.length > 0 && (
+                                    // Carries the current selection through, so the full desk
+                                    // opens with the same suppliers already loaded.
+                                    <Link
+                                        className="visual-link"
+                                        to={`/analytics/suppliers?compare=${compared.map((supplier) => supplier.id).join(",")}`}
+                                    >
+                                        Full comparison <b aria-hidden="true">→</b>
+                                    </Link>
+                                )}
+                            </div>
+                            {compared.length === 2 ? (
+                                <>
+                                    <div className="comparison-table">
+                                        <div><span>Metric</span>{compared.map((supplier) => <b key={supplier.id}>{supplier.initials}</b>)}</div>
+                                        {[["Measured quality", "score"], ["Contract rating", "rating"], ["On-time %", "onTime"], ["Defects / inspection", "defectRate"]].map(([label, key]) => (
+                                            <div key={key}><span>{label}</span>{compared.map((supplier) => <b key={supplier.id}>{supplier[key] == null ? "—" : key === "onTime" ? `${supplier[key]}%` : supplier[key]}</b>)}</div>
+                                        ))}
+                                    </div>
+                                    <p style={{ fontSize: "0.7rem", color: "var(--muted)", marginTop: "10px" }}>
+                                        Four metrics here. The full desk compares these two on 14, including effective cost
+                                        per accepted unit and recorded cost of poor quality, and takes up to four suppliers.
+                                    </p>
+                                </>
+                            ) : (
+                                <p>
+                                    Select two suppliers from the table to compare their performance
+                                    {compared.length === 1 && <>, or open the <Link className="text-link" to={`/analytics/suppliers?compare=${compared[0].id}`}>full comparison desk</Link></>}.
+                                </p>
+                            )}
+                        </article>
+                    ) : !selected ? (
+                        <article className="workspace-card">
+                            <p>Select a supplier from the register to see its profile.</p>
+                        </article>
+                    ) : (
+                <article className="workspace-card supplier-profile">
                         <div className="supplier-profile__head">
                             <div>
                                 <span className="section-label">Supplier profile</span>
@@ -340,10 +436,11 @@ function Suppliers() {
                             </div>
                         )}
                     </article>
-                ) : null}
+                    )}
+                </div>
             </section>
 
-            <section className="dashboard-grid dashboard-grid--two">
+            <section className="supplier-ranking-section">
                 <article className="workspace-card">
                     <div className="card-heading">
                         <div><span className="section-label">Supplier ranking</span><h2>Price vs. quality exposure</h2></div>
@@ -354,22 +451,9 @@ function Suppliers() {
                                 {supplier.initials}
                             </button>
                         ))}
-                        <span className="scatter-x">Higher effective cost -&gt;</span>
-                        <span className="scatter-y">Higher defect rate -&gt;</span>
+                        <span className="scatter-x">Higher contract unit price -&gt;</span>
+                        <span className="scatter-y">More defects per inspection ^</span>
                     </div>
-                </article>
-                <article className="workspace-card">
-                    <div className="card-heading">
-                        <div><span className="section-label">Side-by-side</span><h2>Comparison desk</h2></div>
-                    </div>
-                    {compared.length === 2 ? (
-                        <div className="comparison-table">
-                            <div><span>Metric</span>{compared.map((supplier) => <b key={supplier.id}>{supplier.initials}</b>)}</div>
-                            {[["Measured quality", "score"], ["Contract rating", "rating"], ["On-time %", "onTime"], ["Defects / inspection", "defectRate"]].map(([label, key]) => (
-                                <div key={key}><span>{label}</span>{compared.map((supplier) => <b key={supplier.id}>{supplier[key] == null ? "—" : key === "onTime" ? `${supplier[key]}%` : supplier[key]}</b>)}</div>
-                            ))}
-                        </div>
-                    ) : <p>Select two suppliers from the table to compare their performance.</p>}
                 </article>
             </section>
         </OperationsShell>

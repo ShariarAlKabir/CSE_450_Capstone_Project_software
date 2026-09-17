@@ -375,3 +375,314 @@ p { color: var(--muted); font-size: 0.95rem; line-height: 1.7; }
 .capture-placeholder { color: #9fb0a5; font-size: 0.74rem; }
 .capture-live { position: absolute; top: 10px; left: 10px; display: flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 99px; color: #eafff2; background: rgba(20, 124, 114, 0.88); font-size: 0.6rem; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; }
 .capture-live::before { width: 7px; height: 7px; border-radius: 50%; background: #7df5b6; content: ""; }
+
+/* ==========================================================================
+   UI refresh
+   Layered on top of the existing sheet so page markup does not have to change.
+   Goals: one visual language across both shells, visible feedback on every
+   interactive element, and layouts that do not stretch a short card to match a
+   long one.
+   ========================================================================== */
+
+:root {
+  /* elevation scale — was two ad-hoc shadows */
+  --lift-1: 0 1px 2px rgba(24, 43, 35, 0.05);
+  --lift-2: 0 4px 12px rgba(24, 43, 35, 0.07);
+  --lift-3: 0 14px 32px rgba(24, 43, 35, 0.11);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  /* interaction surfaces */
+  --hover-wash: color-mix(in srgb, var(--accent, #147c72) 6%, transparent);
+  --active-wash: color-mix(in srgb, var(--accent, #147c72) 12%, transparent);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent, #147c72) 32%, transparent);
+  --warning: #a9741b;
+  --warning-soft: #fbf0dc;
+}
+
+/* ---------------------------------------------------------------- a11y ---- */
+/* Every animation in this sheet is decorative, so honour the OS setting. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* One focus treatment for everything focusable, instead of the outline being
+   defined only for a few selectors. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent, #147c72);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* -------------------------------------------------------------- buttons ---- */
+.button { transition: transform 140ms ease, background 140ms ease, box-shadow 140ms ease, border-color 140ms ease; }
+.button:active:not(:disabled) { transform: translateY(0) scale(0.985); }
+.button-quiet {
+  min-height: 42px; padding: 10px 16px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink-soft);
+  font-size: 0.8rem; font-weight: 800; box-shadow: var(--lift-1);
+}
+.button-quiet:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-dark); box-shadow: var(--lift-2); }
+.button-primary { box-shadow: var(--lift-2); }
+.button-primary:hover:not(:disabled) { box-shadow: var(--lift-3); }
+
+/* Primary action sits last in the row on every page. */
+.operations-pagehead__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ------------------------------------------------------------ nav / shell -- */
+/* The sidebar had a large dead gap between the nav and the footer block. */
+.operations-nav { gap: 3px; }
+.operations-sidebar__footer { margin-top: auto; padding-top: 18px; }
+.operations-nav__link { position: relative; }
+.operations-nav__link.active::before {
+  position: absolute; left: -16px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 20px; border-radius: 0 3px 3px 0;
+  background: #b8e6d4; content: "";
+}
+.operations-nav__link:hover { transform: translateX(1px); }
+
+/* Keep the search and account controls reachable on long pages. */
+.operations-topbar { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(8px); }
+.global-search:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
+
+.operations-content { padding-bottom: 56px; }
+.operations-pagehead h1 { font-size: clamp(1.7rem, 2.6vw, 2.5rem); max-width: 22ch; }
+
+/* ---------------------------------------------------------------- cards ---- */
+.workspace-card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--lift-1);
+  transition: box-shadow 160ms ease, border-color 160ms ease;
+}
+.workspace-card:hover { box-shadow: var(--lift-2); }
+
+/* A short card next to a long one used to stretch, leaving a large blank
+   panel. Let each card take its own height instead. */
+.dashboard-grid--two,
+.dashboard-grid--three,
+.section-grid--two { align-items: start; }
+
+/* Cards that are themselves a link get a lift, the rest stay still. */
+a.kpi-card, a.workspace-card, .inspection-tool-card, .choice-card {
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+a.kpi-card:hover, a.workspace-card:hover, .inspection-tool-card:hover {
+  transform: translateY(-2px); box-shadow: var(--lift-3); border-color: var(--accent);
+}
+
+/* ------------------------------------------------------- rows and tables --- */
+.compact-table__row, .inspection-queue__row, .supplier-row, .shipment-row,
+.attention-item, .activity-item, .audit-log__item, .notification-item {
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+.compact-table__row:hover, .inspection-queue__row:hover, .supplier-row:hover,
+.shipment-row:hover, .attention-item:hover, .activity-item:hover {
+  background: var(--hover-wash);
+}
+.supplier-row.is-selected, .shipment-row.is-selected { background: var(--active-wash); }
+
+/* ---------------------------------------------------------------- forms ---- */
+.select-control select, .supplier-filterbar input, .modal-form input,
+.modal-form select, .modal-form textarea, input[type="number"], input[type="text"] {
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.select-control select:hover, input:hover:not(:disabled) { border-color: var(--accent); }
+
+.filter-pills button { transition: background 140ms ease, color 140ms ease, border-color 140ms ease; }
+.filter-pills button:hover:not(.is-active) { background: var(--hover-wash); color: var(--accent-dark); }
+
+/* ----------------------------------------------- inspection tool pages ----- */
+/* Replaces the old hero-card band from the standalone shell. */
+.tool-intro {
+  display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: clamp(18px, 3vw, 36px); align-items: start;
+  padding: 20px 24px; margin-bottom: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: var(--radius-lg);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--accent-soft) 60%, white), var(--surface));
+}
+.tool-intro__lead { font-size: 0.92rem; line-height: 1.65; color: var(--ink-soft); margin: 0; }
+.tool-intro__aside .hero-note { padding: 0 0 0 16px; border-left: 2px solid var(--accent); }
+.tool-intro__aside .hero-note p { font-size: 0.8rem; }
+.tool-content { display: grid; gap: 18px; }
+
+/* The tool pages set their own shell background; inside the operations shell
+   they must not repaint it or draw the old grid backdrop. */
+.operations-content .app-shell,
+.operations-content .app-shell__backdrop { display: contents; background: none; }
+.operations-content .app-shell__container { width: 100%; padding: 0; }
+
+.panel-card { border-radius: var(--radius-lg); box-shadow: var(--lift-1); }
+.panel-card:hover { box-shadow: var(--lift-2); }
+.choice-card { min-height: 0; padding: 20px; }
+.choice-card:hover { transform: translateY(-2px); }
+
+/* ---------------------------------------------------------- status chips --- */
+.table-status, .shipment-status, .tier-badge, .status-pill {
+  border-radius: 999px; font-weight: 700; letter-spacing: 0.01em;
+}
+
+/* --------------------------------------------------------------- layout ---- */
+/* A short detail panel beside a long list used to stretch to match it, leaving
+   a large blank area under the content. */
+.supplier-layout, .shipment-board, .account-layout { align-items: start; }
+
+/* Form fields inside the inspection tools: .select-control is built for the
+   inline toolbars, where the label sits beside the control. In a form that
+   produced right-aligned labels jammed against the inputs. */
+.tool-content .select-control {
+  display: grid; gap: 5px; width: 100%; margin-left: 0;
+  font-size: 0.72rem; color: var(--muted); font-weight: 700;
+}
+.tool-content .select-control select,
+.tool-content .select-control input {
+  width: 100%; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink); font-size: 0.86rem; font-weight: 600;
+}
+.tool-content .panel-card > .button { justify-self: start; }
+
+/* NOTE: the sidebar only becomes an off-canvas drawer at 840px (see the
+   breakpoint above). Collapsing .operations-shell to one column before that
+   would stack a full-width sidebar on top of the content, so only the inner
+   grids reflow here. */
+@media (max-width: 1100px) {
+  .tool-intro { grid-template-columns: 1fr; }
+  .section-grid--two { grid-template-columns: 1fr; }
+}
+
+/* ==========================================================================
+   Grouped filter toolbar
+   ========================================================================== */
+.filterbar {
+  display: flex; flex-wrap: wrap; align-items: stretch;
+  gap: 0; padding: 6px 4px; margin-bottom: 14px;
+}
+.filterbar__group {
+  display: flex; flex-direction: column; justify-content: center; gap: 6px;
+  padding: 10px 18px; min-width: 0;
+}
+.filterbar__group + .filterbar__group { border-left: 1px solid var(--line); }
+.filterbar__group--grow { flex: 1 1 200px; }
+.filterbar__label {
+  font-family: "DM Mono", monospace; font-size: 0.58rem; font-weight: 500;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+}
+.filterbar__controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filterbar__controls > input {
+  width: 100%; min-width: 0; padding: 7px 0; border: 0;
+  border-bottom: 1px solid var(--line); background: transparent;
+  color: var(--ink); font-size: 0.86rem;
+}
+.filterbar__controls > input:focus { outline: 0; border-bottom-color: var(--accent); }
+.filterbar__controls select {
+  padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink); font-size: 0.78rem; font-weight: 700;
+}
+/* the label already names the group, so the inline caption is redundant here */
+.filterbar .select-control { display: contents; }
+
+@media (max-width: 900px) {
+  .filterbar__group { flex: 1 1 100%; padding: 10px 14px; }
+  .filterbar__group + .filterbar__group { border-left: 0; border-top: 1px solid var(--line); }
+}
+
+/* Tier badges: the data uses Preferred / Approved / Conditional. The sheet only
+   styled preferred / standard / watchlist, so two of the three were unstyled. */
+.tier-badge--approved { color: #4d6859; background: #ebf0ea; }
+.tier-badge--conditional { color: #975c0b; background: #fbefd9; }
+
+/* ==========================================================================
+   Supplier workspace
+   The register keeps a fixed, comfortable width and the detail panel takes the
+   rest, because that panel carries far more information than the list does.
+   ========================================================================== */
+.supplier-layout { grid-template-columns: minmax(300px, 0.62fr) minmax(0, 1.38fr); gap: 16px; }
+.supplier-ranking-section { margin-top: 16px; }
+
+.supplier-workspace { display: grid; gap: 0; align-content: start; min-width: 0; }
+.workspace-tabs { display: flex; gap: 4px; padding: 0 4px 10px; }
+.workspace-tabs button {
+  padding: 8px 16px; border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--muted);
+  font-size: 0.78rem; font-weight: 800;
+  transition: background 140ms ease, color 140ms ease;
+}
+.workspace-tabs button:hover { background: var(--hover-wash); color: var(--accent-dark); }
+.workspace-tabs button.is-active { color: var(--accent-dark); background: var(--accent-soft); }
+
+/* --- profile density -------------------------------------------------------
+   The profile crammed contacts, scores, stats and a callout into a narrow
+   column, which truncated the email and wrapped every label onto two lines. */
+.supplier-profile { padding: 26px 28px; }
+.supplier-profile .profile-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+.supplier-profile .profile-chip { min-width: 0; padding: 12px 14px; }
+.supplier-profile .profile-chip__value { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; }
+.supplier-profile .score-breakdown { display: grid; gap: 12px; margin-top: 4px; }
+.supplier-profile .score-breakdown > div {
+  display: grid; grid-template-columns: 132px 46px minmax(0, 1fr); align-items: center; gap: 12px;
+}
+.supplier-profile .score-breakdown span { font-size: 0.76rem; color: var(--ink-soft); white-space: nowrap; }
+.supplier-profile .score-breakdown b { font-size: 0.86rem; text-align: right; font-variant-numeric: tabular-nums; }
+.supplier-profile .score-breakdown i { height: 7px; border-radius: 99px; background: var(--accent); }
+.supplier-profile .supplier-stat-grid { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.supplier-profile .supplier-stat-grid > div { padding: 13px 15px; }
+.supplier-profile .profile-tab-panel { display: grid; gap: 16px; padding-top: 16px; }
+.supplier-profile .contact-directory__row { padding: 13px 4px; }
+
+@media (max-width: 1240px) {
+  .supplier-layout { grid-template-columns: 1fr; }
+}
+
+/* Register rows: four flexible columns instead of six fixed ones, which
+   overflowed once the list column was narrowed to give the detail panel room. */
+.supplier-table-card .supplier-row {
+  grid-template-columns: 30px minmax(0, 1fr) auto 26px;
+  align-items: center; gap: 11px; padding: 12px 4px;
+}
+.supplier-row__id { display: grid; gap: 3px; min-width: 0; }
+.supplier-row__id strong { font-size: 0.82rem; line-height: 1.25; white-space: normal; }
+.supplier-row__id small { color: var(--muted); font-size: 0.64rem; }
+.supplier-row__id .tier-badge { justify-self: start; margin-top: 2px; }
+.supplier-row__score { font-size: 1rem; font-variant-numeric: tabular-nums; text-align: right; }
+.supplier-table-card .compare-toggle { display: grid; place-items: center; }
+.supplier-table-card .compare-toggle input { width: 15px; height: 15px; cursor: pointer; }
+
+/* Smaller marks so overlapping suppliers stay readable in the ranking plot. */
+.supplier-ranking-section .scatter-point { width: 25px; height: 25px; font-size: 0.55rem; }
+
+/* In-card filter rows: same grouping idea as the page-level bar, lighter chrome.
+   These controls used to sit unlabelled in the card heading, so a status pill
+   and a domain pill looked like one set of options. */
+.card-filters {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0;
+  padding: 12px 0 4px; margin-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.card-filters__group { display: flex; flex-direction: column; gap: 6px; padding: 0 16px 10px; min-width: 0; }
+.card-filters__group:first-child { padding-left: 0; }
+/* Spacing rather than a rule: these groups wrap inside narrow cards, and a
+   border-left ends up stranded at the start of the wrapped line. */
+.card-filters__group + .card-filters__group { padding-left: 24px; }
+.card-filters__group--grow { flex: 1 1 180px; }
+.card-filters__input {
+  width: 100%; padding: 7px 0; border: 0; border-bottom: 1px solid var(--line);
+  background: transparent; font-size: 0.8rem;
+}
+.card-filters__input:focus { outline: 0; border-bottom-color: var(--accent); }
+@media (max-width: 900px) {
+  .card-filters__group { flex: 1 1 100%; padding: 0 0 10px; }
+  .card-filters__group + .card-filters__group { padding-left: 0; }
+}
+
+/* The analytics pairing stretched a short detail card to match a tall chart,
+   leaving a large gap above its footer action. */
+.dashboard-grid--analytics { align-items: start; }
+
+/* A long address is better wrapped than clipped — the chip has the width now. */
+.supplier-profile .profile-chip__value { white-space: normal; overflow-wrap: anywhere; }

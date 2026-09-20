@@ -6,6 +6,8 @@ import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import { TrendChart } from "../components/Visuals";
 
+import DashboardActions from "../components/DashboardActions";
+
 const scopes = ["Fabric", "Label", "All"];
 
 function Home() {
@@ -75,6 +77,8 @@ function Home() {
                 <div className="filter-pills">{scopes.map((item) => <button key={item} className={scope === item ? "is-active" : ""} onClick={() => setScope(item)}>{item}</button>)}</div>
                 <label className="select-control">Period <select value={period} onChange={(event) => setPeriod(event.target.value)}><option>This week</option><option>This month</option><option>This quarter</option><option>This year</option></select></label>
             </section>
+
+            <DashboardActions scope={scope} />
 
             <section className="kpi-grid kpi-grid--linked" aria-label="Operational summary">
                 <Link className="kpi-card kpi-card--suppliers" to={analyticsLink("suppliers")}>

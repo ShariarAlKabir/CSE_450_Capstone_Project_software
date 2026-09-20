@@ -13,8 +13,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/create_table.sql:/docker-entrypoint-initdb.d/01_create_table.sql
-      - ./backend/insert_table.sql:/docker-entrypoint-initdb.d/02_insert_table.sql
+      - ./backend/bulk_schema.sql:/docker-entrypoint-initdb.d/01_bulk_schema.sql
+      - ./backend/bulk_seed.sql:/docker-entrypoint-initdb.d/02_bulk_seed.sql
 
 volumes:
   postgres_data:

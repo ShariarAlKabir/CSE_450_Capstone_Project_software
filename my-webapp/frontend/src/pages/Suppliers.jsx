@@ -8,6 +8,7 @@ import FilterBar, { FilterGroup, FilterPills } from "../components/FilterBar";
 import ScopeToggle from "../components/ScopeToggle";
 import Modal from "../components/Modal";
 import { ScoreRing } from "../components/Visuals";
+import SupplierComparison from "../components/SupplierComparison";
 
 const tierClass = (tier) => (tier || "standard").toLowerCase();
 
@@ -37,6 +38,11 @@ const normalizeSupplier = (row) => {
         score,
         rating,
         quality,
+        qualityInspections: Number(row.quality_inspections || 0),
+        qualityStart: row.quality_start,
+        qualityEnd: row.quality_end,
+        inspectionStart: row.inspection_start,
+        inspectionEnd: row.inspection_end,
         defectRate: row.defect_rate != null ? Number(row.defect_rate) : null,
         rejectRate: row.reject_rate != null ? Number(row.reject_rate) : null,
         unitPrice: row.unit_price != null ? Number(row.unit_price) : null,
@@ -185,7 +191,7 @@ function Suppliers() {
         if (!span || supplier.defectRate == null) return 50;
         return 10 + ((Number(supplier.defectRate) - min) / span) * 78;
     };
-    const compared = suppliers.filter((supplier) => compareIds.includes(supplier.id));
+    const compared = compareIds.map((id) => suppliers.find((supplier) => supplier.id === id)).filter(Boolean);
 
     const selectSupplier = (id) => setSearchParams({ selected: id });
     const toggleComparison = (id) => setCompareIds((current) => {
@@ -268,7 +274,7 @@ function Suppliers() {
                                 </span>
                                 <strong className="supplier-row__score">{supplier.score}</strong>
                                 <label className="compare-toggle" onClick={(event) => event.stopPropagation()} title="Add to comparison">
-                                    <input type="checkbox" checked={compareIds.includes(supplier.id)} onChange={() => toggleComparison(supplier.id)} />
+                                    <input type="checkbox" aria-label={`Compare ${supplier.name}`} checked={compareIds.includes(supplier.id)} onChange={() => toggleComparison(supplier.id)} />
                                 </label>
                             </button>
                         ))}
@@ -304,25 +310,11 @@ function Suppliers() {
                                     </Link>
                                 )}
                             </div>
-                            {compared.length === 2 ? (
-                                <>
-                                    <div className="comparison-table">
-                                        <div><span>Metric</span>{compared.map((supplier) => <b key={supplier.id}>{supplier.initials}</b>)}</div>
-                                        {[["Measured quality", "score"], ["Contract rating", "rating"], ["On-time %", "onTime"], ["Defects / inspection", "defectRate"]].map(([label, key]) => (
-                                            <div key={key}><span>{label}</span>{compared.map((supplier) => <b key={supplier.id}>{supplier[key] == null ? "—" : key === "onTime" ? `${supplier[key]}%` : supplier[key]}</b>)}</div>
-                                        ))}
-                                    </div>
-                                    <p style={{ fontSize: "0.7rem", color: "var(--muted)", marginTop: "10px" }}>
-                                        Four metrics here. The full desk compares these two on 14, including effective cost
-                                        per accepted unit and recorded cost of poor quality, and takes up to four suppliers.
-                                    </p>
-                                </>
-                            ) : (
-                                <p>
-                                    Select two suppliers from the table to compare their performance
-                                    {compared.length === 1 && <>, or open the <Link className="text-link" to={`/analytics/suppliers?compare=${compared[0].id}`}>full comparison desk</Link></>}.
-                                </p>
-                            )}
+                            <SupplierComparison
+                                suppliers={suppliers}
+                                selectedIds={compareIds}
+                                onSelectionChange={setCompareIds}
+                            />
                         </article>
                     ) : !selected ? (
                         <article className="workspace-card">

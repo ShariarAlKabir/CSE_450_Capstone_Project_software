@@ -5,6 +5,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
+import ComparisonEvidence from "../components/ComparisonEvidence";
 import FilterBar, { FilterGroup, FilterPills } from "../components/FilterBar";
 
 // Categorical slots 1-4, validated for CVD separation and the chroma/lightness
@@ -133,6 +134,11 @@ const shapeSupplier = (row) => {
 
         // --- comparison metrics -------------------------------------------
         quality,
+        qualityInspections: Number(row.quality_inspections || 0),
+        qualityStart: row.quality_start,
+        qualityEnd: row.quality_end,
+        inspectionStart: row.inspection_start,
+        inspectionEnd: row.inspection_end,
         rating,
         qualityDelta: quality != null && rating != null ? quality - rating : null,
         defectRate: row.defect_rate != null ? Number(row.defect_rate) : null,
@@ -490,7 +496,7 @@ export default function SupplierAnalytics() {
                 </div>
 
                 {compared.length >= 2 ? (
-                    <div style={{ overflowX: "auto" }}>
+                    <div className="analytics-comparison-scroll" tabIndex={0} role="region" aria-label="Supplier comparison table">
                         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: `${240 + compared.length * 150}px` }}>
                             <thead>
                                 <tr>
@@ -507,6 +513,7 @@ export default function SupplierAnalytics() {
                                             <small style={{ color: "var(--muted)", fontSize: "0.62rem" }}>
                                                 {s.tier} · {wins[s.id] || 0} best
                                             </small>
+                                            <ComparisonEvidence supplier={s} />
                                         </th>
                                     ))}
                                 </tr>
@@ -540,8 +547,14 @@ export default function SupplierAnalytics() {
                                                                 {allSame && " · all equal"}
                                                             </small>
                                                         </td>
-                                                        {compared.map((s) => {
+                                                        {compared.map((s, index) => {
                                                             const v = s[m.key];
+                                                            const other = compared.length === 2 ? compared[1 - index] : null;
+                                                            const difference = other && v != null && other[m.key] != null
+                                                                ? Number(v) - Number(other[m.key]) : null;
+                                                            const roundedDifference = difference == null ? null : Number(difference.toFixed(2));
+                                                            const deltaTone = roundedDifference == null || roundedDifference === 0
+                                                                ? "neutral" : roundedDifference > 0 ? "better" : "worse";
                                                             const isBest = leaders[m.key] === s.id;
                                                             // No bar when there is nothing to compare: an
                                                             // empty track next to "0.0" reads as broken.
@@ -553,15 +566,21 @@ export default function SupplierAnalytics() {
                                                                     background: isBest ? "color-mix(in srgb, var(--success) 8%, transparent)" : "transparent",
                                                                     borderRadius: "6px",
                                                                 }}>
-                                                                    <div style={{ display: "flex", alignItems: "baseline", gap: "5px" }}>
+                                                                    <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: "5px" }}>
                                                                         <b style={{
                                                                             fontSize: "0.82rem", fontVariantNumeric: "tabular-nums",
                                                                             color: v == null ? "var(--muted)" : "var(--ink)",
                                                                         }}>
                                                                             {m.format(v)}
                                                                         </b>
+                                                                        {roundedDifference != null && <span
+                                                                            className={`supplier-compare__delta supplier-compare__delta--${deltaTone}`}
+                                                                            title={`This value minus ${other.name}'s value${m.suffix === "%" ? " (percentage points)" : ""}`}
+                                                                            aria-label={`Difference versus ${other.name}: ${roundedDifference > 0 ? "+" : ""}${roundedDifference}${m.suffix === "%" ? " percentage points" : ""}`}
+                                                                        >{roundedDifference > 0 ? "+" : roundedDifference < 0 ? "−" : ""}{Math.abs(roundedDifference).toLocaleString(undefined, { maximumFractionDigits: 2 })}{m.suffix === "%" ? " pp" : ""}</span>}
                                                                         {isBest && <span title="Best of the compared set" style={{ color: "var(--success)", fontSize: "0.66rem", fontWeight: 700 }}>▲</span>}
                                                                     </div>
+                                                                    {m.key === "quality" && <ComparisonEvidence supplier={s} quality />}
                                                                     {/* signed metrics grow from a centre baseline so a
                                                                         negative value cannot look like a large positive one */}
                                                                     <div style={{ height: "5px", background: "#f0f3ef", borderRadius: "3px", marginTop: "5px", position: "relative", overflow: "hidden" }}>
@@ -589,6 +608,7 @@ export default function SupplierAnalytics() {
                             </tbody>
                         </table>
                         <p style={{ fontSize: "0.66rem", color: "var(--muted)", margin: "12px 0 0", paddingTop: "10px", borderTop: "1px solid var(--line)" }}>
+                            {compared.length === 2 && <>The signed number beside each value is its difference from the other supplier. “pp” means percentage points. </>}
                             Each bar is that value against the largest in its own row, so bars compare across a row, never
                             down a column. ▲ marks the best value; a tied row has no winner. Signed rows grow from a centre line.
                         </p>

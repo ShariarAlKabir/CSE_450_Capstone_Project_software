@@ -67,6 +67,8 @@ def get_suppliers():
                        COALESCE(sh.shipment_count, 0) AS shipment_count,
                        COALESCE(sh.avg_quality, 0)    AS avg_shipment_quality,
                        COALESCE(sh.on_time_pct, 0)    AS on_time_pct,
+                       ins.inspection_start, ins.inspection_end,
+                       ins.quality_inspections, ins.quality_start, ins.quality_end,
                        COALESCE(ins.inspections, 0)   AS inspections,
                        ins.avg_ssim,
                        COALESCE(ins.total_defects, 0) AS total_defects,
@@ -91,6 +93,11 @@ def get_suppliers():
                 LEFT JOIN (
                     SELECT sh2.supplier_id,
                            COUNT(*) AS inspections,
+                           MIN(li.inspected_at)::date AS inspection_start,
+                           MAX(li.inspected_at)::date AS inspection_end,
+                           COUNT(li.ssim_score) AS quality_inspections,
+                           (MIN(li.inspected_at) FILTER (WHERE li.ssim_score IS NOT NULL))::date AS quality_start,
+                           (MAX(li.inspected_at) FILTER (WHERE li.ssim_score IS NOT NULL))::date AS quality_end,
                            AVG(li.ssim_score) AS avg_ssim,
                            COALESCE(SUM(df.defect_count), 0) AS total_defects,
                            COUNT(*) FILTER (WHERE UPPER(SPLIT_PART(li.verdict, '_', 1)) = 'REJECT') AS rejects

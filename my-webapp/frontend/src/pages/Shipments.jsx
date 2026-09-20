@@ -77,7 +77,7 @@ function Shipments() {
     const [filter, setFilter] = useState("All");
     const [shipments, setShipments] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [scope, setScope] = useState("Fabric");
+    const [scope, setScope] = useState(() => ["Fabric", "Label", "All"].includes(searchParams.get("scope")) ? searchParams.get("scope") : "Fabric");
     const [supplierOptions, setSupplierOptions] = useState([]);
     const [showAddShipment, setShowAddShipment] = useState(false);
     const [openStage, setOpenStage] = useState("");

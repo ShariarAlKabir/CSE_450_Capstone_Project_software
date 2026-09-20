@@ -7,6 +7,7 @@ import OperationsShell from "../components/OperationsShell";
 import { TrendChart } from "../components/Visuals";
 
 import DashboardActions from "../components/DashboardActions";
+import DashboardCharts from "../components/DashboardCharts";
 
 const scopes = ["Fabric", "Label", "All"];
 
@@ -18,9 +19,10 @@ function Home() {
     const [suppliers, setSuppliers] = useState([]);
 
     useEffect(() => {
+        let cancelled = false;
         axios.get(`${API_BASE_URL}/api/fabric/dashboard/stats`, { params: { scope, period } })
-            .then((response) => setStats(response.data))
-            .catch(() => setStats(null));
+            .then((response) => { if (!cancelled) setStats(response.data); })
+            .catch(() => { if (!cancelled) setStats(null); });
 
         Promise.all([
             axios.get(`${API_BASE_URL}/api/fabric/inspections`),
@@ -55,6 +57,7 @@ function Home() {
                 ]);
             })
             .catch(() => setSuppliers([]));
+        return () => { cancelled = true; };
     }, [scope, period]);
 
     const matchesScope = (item) => scope === "All" || item.scope === scope;
@@ -125,6 +128,10 @@ function Home() {
                     <Link className="efficiency-badge" to={analyticsLink("quality")}>{Math.max((stats?.manual_minutes_per_item ?? 0) - (stats?.ai_minutes_per_item ?? 0), 0)} min faster per item <b>→</b></Link>
                 </article>
             </section>
+
+            {stats?.scope === scope && stats?.period === period
+                ? <DashboardCharts key={`${scope}-${period}`} stats={stats} scope={scope} period={period} />
+                : <p role="status">{stats ? "Updating inspection charts..." : "Inspection charts are unavailable until dashboard data loads."}</p>}
 
             <section className="dashboard-grid dashboard-grid--two">
                 <article className="workspace-card attention-card">

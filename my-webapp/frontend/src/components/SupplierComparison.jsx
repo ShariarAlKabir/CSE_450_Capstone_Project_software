@@ -1,5 +1,6 @@
 import { useState } from "react";
 import ComparisonEvidence from "./ComparisonEvidence";
+import ComparisonCharts from "./ComparisonCharts";
 
 const METRICS = [
     { key: "quality", label: "Measured quality", group: "Quality", unit: "/100", high: true, max: 100, help: "Average quality measured from inspections. A higher score means better observed quality." },
@@ -52,6 +53,7 @@ export default function SupplierComparison({ suppliers, selectedIds, onSelection
             </div>
             {!ready ? <p className="supplier-compare__empty">Choose two suppliers above or tick them in the register to start comparing.</p> : <>
                 {pair[0].scope !== pair[1].scope && <p className="supplier-compare__notice">Different domains: fabric and label inspection methods differ. Read these metrics in that context.</p>}
+                <ComparisonCharts key={selectedIds.join("-")} pair={pair} metrics={metrics} />
                 <div className="supplier-compare__sticky" aria-label="Comparing suppliers">
                     {pair.map((supplier, index) => <div key={supplier.id} className={`supplier-compare__value--${index}`}><span className="supplier-compare__marker">{index === 0 ? "A" : "B"}</span><strong>{supplier.name}</strong></div>)}
                 </div>
@@ -73,7 +75,7 @@ export default function SupplierComparison({ suppliers, selectedIds, onSelection
                                 {values.map((value, index) => <div className={`supplier-compare__value supplier-compare__value--${index}`} key={pair[index].id}>
                                     <div><span className="supplier-compare__marker">{index === 0 ? "A" : "B"}</span><b>{value === null ? "No data" : format(value)}<small>{value === null ? "" : metric.unit}</small></b>
                                         {available && <span
-                                            className={`supplier-compare__delta supplier-compare__delta--${tied ? "neutral" : value > values[1 - index] ? "better" : "worse"}`}
+                                            className={`supplier-compare__delta supplier-compare__delta--${tied ? "neutral" : best === index ? "better" : "worse"}`}
                                             title={`Difference from ${pair[1 - index].name}${metric.unit === "%" ? " in percentage points" : ""}`}
                                         >({tied ? "0" : `${value > values[1 - index] ? "+" : "−"}${format(gap)}`}{metric.unit === "%" ? " pp" : ""})</span>}
                                         {best === index && <span className="supplier-compare__best">Better</span>}

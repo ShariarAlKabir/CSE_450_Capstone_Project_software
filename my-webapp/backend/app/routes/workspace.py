@@ -289,3 +289,43 @@ def get_alerts(scope: str = Query("All"), limit: int = Query(25, ge=1, le=100)):
             }
     finally:
         conn.close()
+
+@router.get("/dashboard-actions")
+def dashboard_actions(scope: str = Query("Fabric", pattern="^(Fabric|Label|All)$")):
+    from app.routes.fabric import get_shipments as fabric_shipments
+    from app.routes.label import get_shipments as label_shipments
+
+    shipments = []
+    for domain, loader in [("Fabric", fabric_shipments), ("Label", label_shipments)]:
+        if scope in (domain, "All"):
+            shipments.extend({**row, "scope": domain} for row in loader()["shipments"])
+    def shipment_item(row):
+        code = row.get("shipment_code") or f"{'LSH' if row['scope'] == 'Label' else 'SH'}-{row['shipment_id']}"
+        return {"id": code, "scope": row["scope"], "supplier": row.get("supplier"), "status": row["lifecycle"]}
+    pending = [shipment_item(r) for r in shipments if r.get("lifecycle") in ("Received", "Inspecting")]
+    rejected = [shipment_item(r) for r in shipments if r.get("lifecycle") == "Rejected"]
+    conn = get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                WITH reviews AS (
+                    SELECT 'Fabric' AS scope, inspection_id::text AS id, inspected_at
+                    FROM fabric_inspections WHERE status = 'Pending Review'
+                    UNION ALL
+                    SELECT 'Label', 'LB-' || label_inspection_id::text, inspected_at
+                    FROM label_inspections
+                    WHERE UPPER(SPLIT_PART(COALESCE(verdict, ''), '_', 1)) NOT IN ('PASS', 'REJECT')
+                      AND COALESCE(status, '') NOT IN ('Approved', 'Rejected')
+                )
+                SELECT *, COUNT(*) OVER () AS total FROM reviews
+                WHERE (%s = 'All' OR scope = %s)
+                ORDER BY inspected_at ASC NULLS LAST, scope, id LIMIT 3
+            """, (scope, scope))
+            reviews = [dict(row) for row in cur.fetchall()]
+        return {
+            "pending": {"count": len(pending), "items": pending[:3]},
+            "rejected": {"count": len(rejected), "items": rejected[:3]},
+            "approval": {"count": reviews[0]["total"] if reviews else 0, "items": reviews},
+        }
+    finally:
+        conn.close()

@@ -1,4 +1,4 @@
-services:
+ services:
   postgres:
     image: postgres:16
     container_name: fabric-postgres
@@ -11,9 +11,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+<<<<<<< HEAD
       # Run on FIRST start only (empty data volume). These are the current
       # schema and seed; create_table.sql / insert_table.sql describe the old
       # shared schema and must not be used.
+=======
+>>>>>>> origin/Mehedi
       - ./backend/bulk_schema.sql:/docker-entrypoint-initdb.d/01_bulk_schema.sql
       - ./backend/bulk_seed.sql:/docker-entrypoint-initdb.d/02_bulk_seed.sql
 

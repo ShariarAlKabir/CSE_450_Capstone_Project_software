@@ -112,6 +112,8 @@ def get_suppliers():
                        COALESCE(sh.shipment_count, 0)  AS shipment_count,
                        COALESCE(sh.avg_quality, 0)     AS avg_shipment_quality,
                        COALESCE(sh.on_time_pct, 0)     AS on_time_pct,
+                       ins.inspection_start, ins.inspection_end,
+                       ins.quality_inspections, ins.quality_start, ins.quality_end,
                        COALESCE(ins.inspections, 0)    AS inspections,
                        ins.avg_points                  AS avg_points_per_100,
                        COALESCE(ins.total_defects, 0)  AS total_defects,
@@ -136,6 +138,11 @@ def get_suppliers():
                 LEFT JOIN (
                     SELECT sh2.supplier_id,
                            COUNT(*) AS inspections,
+                           MIN(i.inspected_at)::date AS inspection_start,
+                           MAX(i.inspected_at)::date AS inspection_end,
+                           COUNT(i.points_per_100_yards) AS quality_inspections,
+                           (MIN(i.inspected_at) FILTER (WHERE i.points_per_100_yards IS NOT NULL))::date AS quality_start,
+                           (MAX(i.inspected_at) FILTER (WHERE i.points_per_100_yards IS NOT NULL))::date AS quality_end,
                            ROUND(AVG(i.points_per_100_yards), 2) AS avg_points,
                            SUM(i.total_defects_found) AS total_defects,
                            COUNT(*) FILTER (WHERE i.grade = 'Reject') AS rejects

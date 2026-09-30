@@ -5,6 +5,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
+import FaultSamples from "../components/FaultSamples";
 import { TrendChart } from "../components/Visuals";
 
 const money = (value, currency = "USD") =>
@@ -136,6 +137,8 @@ function Reports() {
                     <b> modelled </b> apply the stored rate assumptions to those volumes.
                 </span>
             </section>
+
+            {scope !== "Label" && <FaultSamples report />}
 
             <section className="dashboard-grid dashboard-grid--analytics">
                 <article className="workspace-card workspace-card--large">

@@ -5,6 +5,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../config.js";
 import OperationsShell from "../components/OperationsShell";
 import ScopeToggle from "../components/ScopeToggle";
+import FaultSamples from "../components/FaultSamples";
 
 function Inspections() {
     const [filter, setFilter] = useState("All");
@@ -115,6 +116,7 @@ function Inspections() {
                     {savingNote ? "Saving..." : "Save note"}
                 </button>
             </div></article></section>
+        {scope !== "Label" && <FaultSamples />}
         {pendingAction && <div className="modal-backdrop" role="presentation"><section className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><span className="section-label">Critical action</span><h2 id="confirm-title">Confirm approval</h2><p>You are about to approve a review-flagged inspection. This will be recorded in the audit log and release the roll from the hold queue.</p><label><input type="checkbox" /> I reviewed the model evidence and operator notes.</label><div><button className="button button-quiet" onClick={() => setPendingAction("")}>Cancel</button><button className="button button-primary" onClick={() => { setConfirmed(pendingAction); setPendingAction(""); }}>Confirm approval</button></div></section></div>}
         {confirmed && <div className="toast-message">{confirmed} recorded with manager sign-off.</div>}
     </OperationsShell>;
